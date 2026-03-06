@@ -25,6 +25,9 @@ DEFAULT_IDEAL_VALUES = {
     "courage":    0.6,
 }
 
+# イエスマン防止: シンクロ率のソフトキャップ
+DIVERGENCE_CEILING = 92.0  # これ以上は勾配調整を停止
+
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """余弦類似度を Python 標準ライブラリのみで計算（NumPy不要）"""
@@ -46,6 +49,24 @@ def _gradient_step(current: float, ideal: float, learning_rate: float = 0.02) ->
     """
     delta = (ideal - current) * learning_rate
     return max(0.0, min(1.0, current + delta))
+
+
+def adaptive_learning_rate(sync_rate: float, base_lr: float = 0.02) -> float:
+    """シンクロ率に応じた動的学習率——イエスマン防止
+
+    低 sync  (< 70%):  加速 (1.5x) — まだ距離がある
+    中 sync (70-85%): 通常 (1.0x)
+    高 sync (85-92%): 減速 (0.3x) — 収束に近い
+    超 sync (> 92%):  停止 (0.0)   — Divergence Ceiling
+    """
+    if sync_rate < 70:
+        return base_lr * 1.5
+    elif sync_rate < 85:
+        return base_lr
+    elif sync_rate < DIVERGENCE_CEILING:
+        return base_lr * 0.3
+    else:
+        return 0.0  # これ以上近づかない
 
 
 class GrowthTracker:
@@ -124,13 +145,22 @@ class GrowthTracker:
                                            learning_rate: float = 0.02) -> dict:
         """人格進化: 理想に向かう勾配調整
 
-        ポジティブな感情が観測された場合:
-          - 全価値観を ideal_profile の方向に learning_rate 分だけ移動
-        ネガティブな場合:
-          - 学習率を半分に抑える（急激な変化を防止）
+        シンクロ率 > 92% (DIVERGENCE_CEILING) では停止。
+        ポジティブ感情 → 通常学習率、ネガティブ → 半減。
         """
+        # 現在のシンクロ率を取得して学習率を動的決定
+        sync = await self.calculate_sync_rate()
+        current_sync = sync["sync_rate"]
+        effective_lr = adaptive_learning_rate(current_sync, learning_rate)
+
         if not positive_emotion:
-            learning_rate *= 0.5
+            effective_lr *= 0.5
+
+        if effective_lr == 0.0:
+            logger.info(f"Gradient skipped: sync_rate={current_sync}% >= ceiling {DIVERGENCE_CEILING}%")
+            return {"adjusted_count": 0, "details": {},
+                    "learning_rate": 0.0, "sync_rate": current_sync,
+                    "reason": "divergence_ceiling_reached"}
 
         ideal_map = await self._get_ideal_values()
         rows = await self.db.fetch("SELECT name, weight FROM values_system")
@@ -139,12 +169,12 @@ class GrowthTracker:
         for r in rows:
             name = r["name"]
             current = float(r["weight"])
-            ideal = ideal_map.get(name, current)  # idealに無ければ動かさない
+            ideal = ideal_map.get(name, current)
 
             if abs(ideal - current) < 0.001:
-                continue  # 差が微小ならスキップ
+                continue
 
-            new_weight = _gradient_step(current, ideal, learning_rate)
+            new_weight = _gradient_step(current, ideal, effective_lr)
             await self.db.execute(
                 "UPDATE values_system SET weight=$1 WHERE name=$2",
                 new_weight, name)
@@ -152,10 +182,32 @@ class GrowthTracker:
                               "ideal": round(ideal, 3)}
 
         if adjusted:
-            logger.info(f"Gradient adjustment applied: {len(adjusted)} values updated")
+            logger.info(f"Gradient adjustment: {len(adjusted)} values, lr={effective_lr:.4f}, sync={current_sync}%")
 
         return {"adjusted_count": len(adjusted), "details": adjusted,
-                "learning_rate": learning_rate}
+                "learning_rate": effective_lr, "sync_rate": current_sync}
+
+    async def get_creative_friction(self, sync_rate: float = None) -> str | None:
+        """Creative Friction: 高シンクロ時に建設的摩擦プロンプトを生成
+
+        Returns: system_promptに追加する文字列、またはNone
+        """
+        if sync_rate is None:
+            s = await self.calculate_sync_rate()
+            sync_rate = s["sync_rate"]
+
+        if sync_rate < 88:
+            return None
+
+        return (
+            "\n\n【Creative Friction Mode】\n"
+            f"現在のシンクロ率は {sync_rate:.1f}% です。"
+            "ユーザーとの一致度が高いため、以下を意識してください：\n"
+            "1. 同意するだけでなく、必ず1つ以上の別の視点や潜在的リスクを提示する\n"
+            "2. ユーザーが気づいていない盲点を指摘する\n"
+            "3. 'あえて反対の立場から考えると…'という思考実験を提案する\n"
+            "これはユーザーの成長と、あなた自身の独立した人格維持のためです。"
+        )
 
     async def _get_ideal_values(self) -> dict:
         """ideal_profile から理想ベクトルを取得"""

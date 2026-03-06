@@ -246,6 +246,11 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         else:
             # Function Calling: マルチツール連鎖対応（最大3回）
             system_prompt = await personality.build_system_prompt()
+            # Creative Friction: 高シンクロ時にAIの独立性を維持
+            friction = await growth.get_creative_friction()
+            if friction:
+                system_prompt += friction
+                logger.info(f"[{session_id[:8]}] Creative Friction Mode activated")
             context = await memory.build_context(session_id, req.message)
             full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
 
@@ -800,12 +805,46 @@ async def identity_manifest(_=Depends(verify_api_key)):
     # シンクロ率
     sync = await growth.calculate_sync_rate()
 
+    # Proof of History: 成長の軌跡（偽造防止）
+    conv_count = await db_pool.fetchrow("SELECT COUNT(*) as c FROM conversation_log")
+    dec_count = await db_pool.fetchrow("SELECT COUNT(*) as c FROM decision_log")
+    learn_count = await db_pool.fetchrow("SELECT COUNT(*) as c FROM learning_log")
+    first_msg = await db_pool.fetchrow("SELECT MIN(created_at) as t FROM conversation_log")
+
+    # 成長ハッシュ: sync_rate_history の連鎖ハッシュ
+    sync_rows = await db_pool.fetch(
+        "SELECT sync_rate, created_at FROM sync_rate_history ORDER BY created_at")
+    chain = ""
+    for sr in sync_rows:
+        chain += f"{sr['sync_rate']}:{sr['created_at'].isoformat()}"
+    growth_hash = hashlib.sha256(chain.encode()).hexdigest()[:32] if chain else "none"
+
+    # Hardware Binding (miniPC固有)
+    hw_fingerprint = "unknown"
+    try:
+        import subprocess
+        mid = subprocess.run(["cat", "/etc/machine-id"],
+                            capture_output=True, text=True, timeout=2)
+        if mid.returncode == 0:
+            hw_fingerprint = hashlib.sha256(mid.stdout.strip().encode()).hexdigest()[:32]
+    except Exception:
+        pass
+
     return {
-        "manifest_version": "1.0",
+        "manifest_version": "2.0",
         "anonymous_id": anon_id,
         "value_vector": value_vector,
         "belief_strength": belief_vector,
         "dimensions": len(value_vector),
         "sync_rate": sync["sync_rate"],
+        "proof_of_history": {
+            "total_conversations": conv_count["c"] if conv_count else 0,
+            "total_decisions": dec_count["c"] if dec_count else 0,
+            "total_learnings": learn_count["c"] if learn_count else 0,
+            "growth_hash": growth_hash,
+            "first_boot": first_msg["t"].isoformat() if first_msg and first_msg["t"] else None,
+        },
+        "hardware_bound": hw_fingerprint != "unknown",
+        "device_fingerprint": hw_fingerprint,
         "protocol": "cocoro-core/v10-compatible",
     }
