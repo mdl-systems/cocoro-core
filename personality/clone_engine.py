@@ -23,95 +23,104 @@ class PersonalityCloneEngine:
 
     async def backup(self) -> dict:
         """現在の人格を完全バックアップ"""
-        # Identity
-        identity = await self.db.fetchrow(
-            "SELECT owner_name, profile, philosophy FROM identity LIMIT 1")
+        try:
+            # Identity
+            identity = await self.db.fetchrow(
+                "SELECT owner_name, profile, philosophy FROM identity LIMIT 1")
 
-        # Values
-        values = await self.db.fetch(
-            "SELECT name, weight, category, description FROM values_system "
-            "ORDER BY weight DESC")
+            # Values
+            values = await self.db.fetch(
+                "SELECT name, weight, category, description FROM values_system "
+                "ORDER BY weight DESC")
 
-        # Beliefs
-        beliefs = await self.db.fetch(
-            "SELECT statement, confidence, source, evidence_count "
-            "FROM beliefs ORDER BY confidence DESC")
+            # Beliefs
+            beliefs = await self.db.fetch(
+                "SELECT statement, confidence, source, evidence_count "
+                "FROM beliefs ORDER BY confidence DESC")
 
-        # Emotion State
-        emotion = await self.db.fetchrow(
-            "SELECT happiness, sadness, anger, fear, surprise, trust "
-            "FROM emotion_state ORDER BY updated_at DESC LIMIT 1")
+            # Emotion State
+            emotion = await self.db.fetchrow(
+                "SELECT happiness, sadness, anger, fear, surprise, trust "
+                "FROM emotion_state ORDER BY updated_at DESC LIMIT 1")
 
-        # Goals
-        goals = await self.db.fetch(
-            "SELECT title, description, goal_type, priority, status "
-            "FROM goals ORDER BY priority DESC")
+            # Goals
+            goals = await self.db.fetch(
+                "SELECT title, description, goal_type, priority, status "
+                "FROM goals ORDER BY priority DESC")
 
-        # Ideal Profile
-        ideal = await self.db.fetchrow(
-            "SELECT ideal_profile FROM identity LIMIT 1")
-        ideal_profile = None
-        if ideal and ideal["ideal_profile"]:
+            # Ideal Profile
+            ideal = await self.db.fetchrow(
+                "SELECT ideal_profile FROM identity LIMIT 1")
+            ideal_profile = None
+            if ideal and ideal["ideal_profile"]:
+                try:
+                    ideal_profile = json.loads(ideal["ideal_profile"]) if isinstance(ideal["ideal_profile"], str) else dict(ideal["ideal_profile"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Sync rate
+            sync = await self.db.fetchrow(
+                "SELECT sync_rate FROM sync_rate_history "
+                "ORDER BY measured_at DESC LIMIT 1")
+
+            backup_data = {
+                "version": "1.0",
+                "backed_up_at": datetime.now(JST).isoformat(),
+                "identity": {
+                    "owner_name": str(identity["owner_name"]) if identity else "",
+                    "profile": str(identity["profile"]) if identity else "",
+                    "philosophy": str(identity["philosophy"]) if identity else "",
+                },
+                "values": [
+                    {"name": str(v["name"]), "weight": float(v["weight"]),
+                     "category": str(v["category"]), "description": str(v["description"])}
+                    for v in values
+                ],
+                "beliefs": [
+                    {"statement": str(b["statement"]),
+                     "confidence": float(b["confidence"]),
+                     "source": str(b["source"]),
+                     "evidence_count": int(b["evidence_count"])}
+                    for b in beliefs
+                ],
+                "emotion": {
+                    "happiness": float(emotion["happiness"]) if emotion else 0.5,
+                    "sadness": float(emotion["sadness"]) if emotion else 0.1,
+                    "anger": float(emotion["anger"]) if emotion else 0.0,
+                    "fear": float(emotion["fear"]) if emotion else 0.1,
+                    "surprise": float(emotion["surprise"]) if emotion else 0.2,
+                    "trust": float(emotion["trust"]) if emotion else 0.6,
+                },
+                "goals": [
+                    {"title": str(g["title"]), "description": str(g["description"]),
+                     "goal_type": str(g["goal_type"]), "priority": int(g["priority"]),
+                     "status": str(g["status"])}
+                    for g in goals
+                ],
+                "ideal_profile": ideal_profile,
+                "sync_rate": float(sync["sync_rate"]) if sync else None,
+            }
+
+            # バックアップ記録
             try:
-                ideal_profile = json.loads(ideal["ideal_profile"]) if isinstance(ideal["ideal_profile"], str) else ideal["ideal_profile"]
-            except (json.JSONDecodeError, TypeError):
-                pass
+                await self.db.execute(
+                    "INSERT INTO life_history (event_type, title, description, impact_score) "
+                    "VALUES ('milestone', $1, $2, 3)",
+                    "personality_backup",
+                    json.dumps({
+                        "values_count": len(values),
+                        "beliefs_count": len(beliefs),
+                        "goals_count": len(goals),
+                    }, ensure_ascii=False))
+            except Exception as log_err:
+                logger.warning(f"Backup log failed (non-critical): {log_err}")
 
-        # Sync rate
-        sync = await self.db.fetchrow(
-            "SELECT sync_rate FROM sync_rate_history "
-            "ORDER BY measured_at DESC LIMIT 1")
+            return backup_data
 
-        backup_data = {
-            "version": "1.0",
-            "backed_up_at": datetime.now(JST).isoformat(),
-            "identity": {
-                "owner_name": identity["owner_name"] if identity else "",
-                "profile": identity["profile"] if identity else "",
-                "philosophy": identity["philosophy"] if identity else "",
-            },
-            "values": [
-                {"name": v["name"], "weight": float(v["weight"]),
-                 "category": v["category"], "description": v["description"]}
-                for v in values
-            ],
-            "beliefs": [
-                {"statement": b["statement"],
-                 "confidence": float(b["confidence"]),
-                 "source": b["source"],
-                 "evidence_count": b["evidence_count"]}
-                for b in beliefs
-            ],
-            "emotion": {
-                "happiness": float(emotion["happiness"]) if emotion else 0.5,
-                "sadness": float(emotion["sadness"]) if emotion else 0.1,
-                "anger": float(emotion["anger"]) if emotion else 0.0,
-                "fear": float(emotion["fear"]) if emotion else 0.1,
-                "surprise": float(emotion["surprise"]) if emotion else 0.2,
-                "trust": float(emotion["trust"]) if emotion else 0.6,
-            },
-            "goals": [
-                {"title": g["title"], "description": g["description"],
-                 "goal_type": g["goal_type"], "priority": g["priority"],
-                 "status": g["status"]}
-                for g in goals
-            ],
-            "ideal_profile": ideal_profile,
-            "sync_rate": float(sync["sync_rate"]) if sync else None,
-        }
-
-        # バックアップ記録
-        await self.db.execute(
-            "INSERT INTO life_history (event_type, title, description, impact_score) "
-            "VALUES ('milestone', $1, $2, 3)",
-            "personality_backup",
-            json.dumps({
-                "values_count": len(values),
-                "beliefs_count": len(beliefs),
-                "goals_count": len(goals),
-            }, ensure_ascii=False))
-
-        return backup_data
+        except Exception as e:
+            import traceback
+            logger.error(f"Backup failed: {e}\n{traceback.format_exc()}")
+            return {"error": str(e), "traceback": traceback.format_exc()}
 
     async def restore(self, backup_data: dict) -> dict:
         """バックアップからの人格復元"""
