@@ -110,19 +110,24 @@ class WorkerManager:
         if not self.task_queue:
             raise RuntimeError("TaskQueue not configured")
 
-        task_id = await self.task_queue.enqueue(
-            task_type=agent_type or "auto",
-            payload={"task_name": task_name, "description": description,
-                     "agent_type": agent_type},
-            priority=priority,
-        )
+        import uuid
+        task_id = str(uuid.uuid4())
 
-        # DBにもタスク記録
+        # 1. DBに先にINSERT（Workerが取り出した時にレコードが存在するように）
         await self.db.execute(
             "INSERT INTO tasks (id, title, description, priority, status, assigned_agent) "
             "VALUES ($1::uuid, $2, $3, $4, 'queued', $5)",
             task_id, task_name[:80], description, priority,
             agent_type or "auto")
+
+        # 2. Redisキューに投入
+        await self.task_queue.enqueue_with_id(
+            task_id=task_id,
+            task_type=agent_type or "auto",
+            payload={"task_name": task_name, "description": description,
+                     "agent_type": agent_type},
+            priority=priority,
+        )
 
         return task_id
 

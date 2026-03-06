@@ -24,6 +24,12 @@ class TaskQueue:
                       priority: int = 5) -> str:
         """タスクをキューに投入"""
         task_id = str(uuid.uuid4())
+        await self.enqueue_with_id(task_id, task_type, payload, priority)
+        return task_id
+
+    async def enqueue_with_id(self, task_id: str, task_type: str,
+                               payload: dict, priority: int = 5):
+        """指定IDでタスクをキューに投入"""
         job = json.dumps({
             "task_id": task_id,
             "task_type": task_type,
@@ -31,14 +37,11 @@ class TaskQueue:
             "priority": priority,
             "status": "queued",
         })
-        # 優先度が高い(1)ほど先に処理 → lpush、通常はrpush
         if priority <= 3:
             await self.redis.lpush(self.queue_key, job)
         else:
             await self.redis.rpush(self.queue_key, job)
-
         logger.info(f"Enqueued: {task_type} ({task_id[:8]}) priority={priority}")
-        return task_id
 
     async def dequeue(self, timeout: int = 5) -> dict | None:
         """キューからタスクを取り出し（ブロッキング）"""
