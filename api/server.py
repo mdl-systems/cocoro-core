@@ -203,6 +203,41 @@ app = FastAPI(title="cocoro-core", version="1.0.0",
               description="Personality AI Operating System", lifespan=lifespan)
 
 
+# === Global Exception Handlers ===
+from fastapi.responses import JSONResponse
+import traceback as _tb
+
+@app.exception_handler(LLMError)
+async def llm_error_handler(request: Request, exc: LLMError):
+    """LLM系エラー → 503"""
+    logger.error(f"LLM error on {request.url.path}: {exc}")
+    return JSONResponse(status_code=503, content={
+        "error": f"AI応答エラー: {exc}",
+        "type": "llm_error",
+        "path": str(request.url.path),
+    })
+
+@app.exception_handler(asyncpg.PostgresError)
+async def db_error_handler(request: Request, exc: asyncpg.PostgresError):
+    """DB系エラー → 503"""
+    logger.error(f"DB error on {request.url.path}: {type(exc).__name__}: {exc}")
+    return JSONResponse(status_code=503, content={
+        "error": f"データベースエラー: {type(exc).__name__}",
+        "type": "db_error",
+        "path": str(request.url.path),
+    })
+
+@app.exception_handler(Exception)
+async def global_error_handler(request: Request, exc: Exception):
+    """未処理例外 → 500 JSON（HTML 500を防止）"""
+    logger.error(f"Unhandled error on {request.url.path}: {type(exc).__name__}: {exc}\n{_tb.format_exc()}")
+    return JSONResponse(status_code=500, content={
+        "error": f"内部エラー: {type(exc).__name__}",
+        "type": "internal_error",
+        "path": str(request.url.path),
+    })
+
+
 # === Auth ===
 security = HTTPBearer(auto_error=False)
 
