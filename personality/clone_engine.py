@@ -61,7 +61,7 @@ class PersonalityCloneEngine:
             # Sync rate
             sync = await self.db.fetchrow(
                 "SELECT sync_rate FROM sync_rate_history "
-                "ORDER BY measured_at DESC LIMIT 1")
+                "ORDER BY created_at DESC LIMIT 1")
 
             backup_data = {
                 "version": "1.0",
