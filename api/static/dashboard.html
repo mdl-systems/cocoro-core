@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cocoro-core Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --surface: #111827;
+  --surface2: #1f2937;
+  --border: #374151;
+  --text: #f9fafb;
+  --text2: #9ca3af;
+  --accent: #6366f1;
+  --accent2: #818cf8;
+  --green: #10b981;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+  --blue: #3b82f6;
+  --pink: #ec4899;
+  --cyan: #06b6d4;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Inter', 'Noto Sans JP', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+.header {
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
+  padding: 1.5rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #818cf8, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.header .status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text2);
+}
+.header .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1.25rem;
+  padding: 1.5rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: all 0.3s ease;
+}
+.card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(99,102,241,0.1);
+  transform: translateY(-2px);
+}
+.card-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text2);
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card-title .icon { font-size: 1rem; }
+.metric {
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+.metric-label {
+  font-size: 0.8rem;
+  color: var(--text2);
+}
+.emotion-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+.emotion-item {
+  text-align: center;
+  padding: 0.75rem;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+.emotion-item .name {
+  font-size: 0.7rem;
+  color: var(--text2);
+  margin-bottom: 0.25rem;
+}
+.emotion-item .value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+.bar-container {
+  margin: 0.5rem 0;
+}
+.bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.bar-label .label { color: var(--text2); }
+.bar-label .val { color: var(--text); font-weight: 500; }
+.bar {
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease;
+}
+.list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--surface2);
+  font-size: 0.85rem;
+}
+.list-item:last-child { border-bottom: none; }
+.badge {
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.badge-green { background: rgba(16,185,129,0.15); color: var(--green); }
+.badge-blue { background: rgba(59,130,246,0.15); color: var(--blue); }
+.badge-yellow { background: rgba(245,158,11,0.15); color: var(--yellow); }
+.badge-red { background: rgba(239,68,68,0.15); color: var(--red); }
+.badge-purple { background: rgba(99,102,241,0.15); color: var(--accent2); }
+.voice-btn {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent2);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-family: inherit;
+}
+.voice-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+.voice-btn.listening {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+  animation: pulse 1s infinite;
+}
+.mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.mini-card {
+  background: var(--surface2);
+  border-radius: 8px;
+  padding: 0.75rem;
+  text-align: center;
+}
+.mini-card .num {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.mini-card .txt {
+  font-size: 0.7rem;
+  color: var(--text2);
+}
+.chat-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.chat-input input {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+.chat-input input:focus { outline: none; border-color: var(--accent); }
+.chat-input button {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s;
+}
+.chat-input button:hover { background: var(--accent2); }
+#log {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 0.75rem;
+  color: var(--text2);
+  margin-top: 0.5rem;
+  font-family: 'Courier New', monospace;
+}
+#log div { padding: 0.15rem 0; border-bottom: 1px solid rgba(55,65,81,0.3); }
+.footer {
+  text-align: center;
+  padding: 1.5rem;
+  color: var(--text2);
+  font-size: 0.75rem;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧠 cocoro-core Dashboard</h1>
+  <div class="status">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">接続中…</span>
+    <span style="margin-left:1rem" id="clock"></span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- 感情状態 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">💗</span> 感情状態</div>
+    <div style="text-align:center;margin-bottom:0.75rem">
+      <div class="metric" id="dominantEmotion">—</div>
+      <div class="metric-label">支配的感情</div>
+    </div>
+    <div class="emotion-grid" id="emotionGrid"></div>
+  </div>
+
+  <!-- 行動適応 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🎭</span> 行動適応パラメータ</div>
+    <div id="adaptationBars"></div>
+  </div>
+
+  <!-- システム全体 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">⚡</span> システム概要</div>
+    <div class="mini-grid" id="systemOverview"></div>
+  </div>
+
+  <!-- プラグイン -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🔌</span> プラグインシステム</div>
+    <div id="pluginList"></div>
+  </div>
+
+  <!-- ユーザーセッション -->
+  <div class="card">
+    <div class="card-title"><span class="icon">👥</span> アクティブセッション</div>
+    <div id="sessionList"></div>
+  </div>
+
+  <!-- 人格間通信 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🔗</span> 人格間コミュニケーション</div>
+    <div id="commStats"></div>
+  </div>
+
+  <!-- メモリ -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🧠</span> メモリ統計</div>
+    <div id="memoryStats"></div>
+  </div>
+
+  <!-- 音声インターフェース -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🎤</span> 音声インターフェース</div>
+    <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙️ 音声入力を開始</button>
+    <div id="voiceStatus" style="text-align:center;margin-top:0.5rem;font-size:0.8rem;color:var(--text2)"></div>
+    <div class="chat-input" style="margin-top:0.75rem">
+      <input id="chatInput" placeholder="メッセージを入力…" onkeypress="if(event.key==='Enter')sendChat()">
+      <button onclick="sendChat()">送信</button>
+    </div>
+  </div>
+
+  <!-- LLM状態 -->
+  <div class="card">
+    <div class="card-title"><span class="icon">🤖</span> LLM プロバイダー</div>
+    <div id="llmStatus"></div>
+  </div>
+
+  <!-- ログ -->
+  <div class="card" style="grid-column: span 2">
+    <div class="card-title"><span class="icon">📋</span> システムログ</div>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<div class="footer">cocoro-core Personality OS — Dashboard v1.0</div>
+
+<script>
+const API = '';
+const KEY = localStorage.getItem('cocoro_key') || prompt('API Key:', 'cocoro-secret-2026');
+if (KEY) localStorage.setItem('cocoro_key', KEY);
+const H = { 'Authorization': `Bearer ${KEY}`, 'Content-Type': 'application/json' };
+
+async function api(path) {
+  try {
+    const r = await fetch(API + path, { headers: H });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+async function apiPost(path, body) {
+  try {
+    const r = await fetch(API + path, { method: 'POST', headers: H, body: JSON.stringify(body) });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const t = new Date().toLocaleTimeString('ja-JP');
+  el.innerHTML = `<div>[${t}] ${msg}</div>` + el.innerHTML;
+  if (el.children.length > 50) el.lastChild.remove();
+}
+
+const EMOTION_ICONS = {
+  happiness: '😊', sadness: '😢', anger: '😠',
+  fear: '😨', trust: '🤝', surprise: '😲', neutral: '😐'
+};
+const BAR_COLORS = {
+  creativity_boost: '#8b5cf6',
+  risk_tolerance: '#f59e0b',
+  verbosity: '#3b82f6',
+  empathy_level: '#ec4899',
+};
+
+async function loadEmotions() {
+  const d = await api('/emotion/adaptation');
+  if (!d) return;
+
+  const e = d.emotion_state;
+  const dominant = e.dominant || 'neutral';
+  document.getElementById('dominantEmotion').textContent =
+    (EMOTION_ICONS[dominant] || '😐') + ' ' + dominant;
+
+  let grid = '';
+  for (const [k, v] of Object.entries(e)) {
+    if (k === 'dominant') continue;
+    const pct = (typeof v === 'number') ? (v * 100).toFixed(0) : 0;
+    grid += `<div class="emotion-item"><div class="name">${EMOTION_ICONS[k]||''} ${k}</div><div class="value">${pct}%</div></div>`;
+  }
+  document.getElementById('emotionGrid').innerHTML = grid;
+
+  // 行動適応バー
+  const b = d.behavior;
+  let bars = '';
+  const keys = ['creativity_boost', 'risk_tolerance', 'verbosity', 'empathy_level'];
+  const labels = { creativity_boost: '創造性', risk_tolerance: 'リスク許容', verbosity: '饒舌度', empathy_level: '共感力' };
+  for (const k of keys) {
+    const v = b[k] || 0;
+    const pct = Math.min(100, v * 100);
+    const color = BAR_COLORS[k] || '#6366f1';
+    bars += `<div class="bar-container">
+      <div class="bar-label"><span class="label">${labels[k]}</span><span class="val">${v.toFixed(2)}</span></div>
+      <div class="bar"><div class="bar-fill" style="width:${pct}%;background:${color}"></div></div></div>`;
+  }
+  bars += `<div class="list-item"><span>トーン</span><span class="badge badge-purple">${b.response_tone}</span></div>`;
+  bars += `<div class="list-item"><span>判断速度</span><span class="badge badge-blue">${b.decision_speed}</span></div>`;
+  document.getElementById('adaptationBars').innerHTML = bars;
+  log(`感情更新: ${dominant} (強度: ${(b.intensity*100).toFixed(0)}%)`);
+}
+
+async function loadPlugins() {
+  const d = await api('/plugins');
+  if (!d) return;
+  let html = '';
+  for (const p of d.plugins) {
+    const badge = p.enabled ? '<span class="badge badge-green">有効</span>' : '<span class="badge badge-red">無効</span>';
+    html += `<div class="list-item"><span>🔧 ${p.name}</span>${badge}</div>`;
+  }
+  html += `<div class="list-item" style="color:var(--text2)"><span>合計</span><span>${d.stats.total} プラグイン</span></div>`;
+  document.getElementById('pluginList').innerHTML = html;
+}
+
+async function loadSessions() {
+  const d = await api('/users/stats');
+  if (!d) { document.getElementById('sessionList').innerHTML = '<div class="list-item"><span style="color:var(--text2)">データなし</span></div>'; return; }
+  let html = `
+    <div class="mini-grid">
+      <div class="mini-card"><div class="num">${d.active_sessions}</div><div class="txt">アクティブ</div></div>
+      <div class="mini-card"><div class="num">${d.total_messages}</div><div class="txt">メッセージ</div></div>
+    </div>
+    <div class="list-item" style="margin-top:0.5rem"><span>タイムアウト</span><span>${d.session_timeout_minutes}分</span></div>
+  `;
+  document.getElementById('sessionList').innerHTML = html;
+}
+
+async function loadComm() {
+  const d = await api('/comm/stats');
+  if (!d) return;
+  document.getElementById('commStats').innerHTML = `
+    <div class="mini-grid">
+      <div class="mini-card"><div class="num">${d.peer_count}</div><div class="txt">ピア</div></div>
+      <div class="mini-card"><div class="num">${d.active_discussions}</div><div class="txt">協議中</div></div>
+    </div>
+    <div class="list-item" style="margin-top:0.5rem"><span>受信箱</span><span>${d.inbox_count} 件</span></div>
+    <div class="list-item"><span>自己ID</span><span class="badge badge-purple">${d.self_id}</span></div>
+  `;
+}
+
+async function loadMemory() {
+  const d = await api('/memory/stats');
+  if (!d) return;
+  let html = '';
+  if (d.tables) {
+    for (const t of d.tables) {
+      html += `<div class="list-item"><span>${t.table}</span><span>${t.count} 行</span></div>`;
+    }
+  }
+  html += `<div class="list-item"><span>合計</span><span class="badge badge-blue">${d.total_rows || 0} 行</span></div>`;
+  document.getElementById('memoryStats').innerHTML = html;
+}
+
+async function loadLLM() {
+  const [health, localStats] = await Promise.all([
+    api('/health'),
+    api('/llm/local/stats'),
+  ]);
+  let html = '';
+  if (health) {
+    const badge = health.llm?.healthy !== false ? 'badge-green' : 'badge-yellow';
+    html += `<div class="list-item"><span>メインLLM</span><span class="badge ${badge}">${health.llm?.provider||'gemini'}</span></div>`;
+  }
+  if (localStats) {
+    const badge = localStats.healthy ? 'badge-green' : 'badge-red';
+    html += `<div class="list-item"><span>ローカルLLM</span><span class="badge ${badge}">${localStats.healthy?'接続中':'オフライン'}</span></div>`;
+    html += `<div class="list-item"><span>モデル</span><span>${localStats.current_model}</span></div>`;
+    html += `<div class="list-item"><span>利用可能</span><span>${localStats.model_count} モデル</span></div>`;
+  }
+  document.getElementById('llmStatus').innerHTML = html || '<div class="list-item"><span style="color:var(--text2)">データなし</span></div>';
+}
+
+async function loadSystemOverview() {
+  const [health, agents] = await Promise.all([
+    api('/health'),
+    api('/agent/list'),
+  ]);
+  let agentCount = 0;
+  if (agents && agents.agents) agentCount = agents.agents.length;
+  const isHealthy = health && health.status === 'ok';
+
+  document.getElementById('systemOverview').innerHTML = `
+    <div class="mini-card"><div class="num" style="color:${isHealthy?'var(--green)':'var(--red)'}">${isHealthy?'✓':'✗'}</div><div class="txt">ヘルス</div></div>
+    <div class="mini-card"><div class="num">${agentCount}</div><div class="txt">エージェント</div></div>
+    <div class="mini-card"><div class="num">${health?.llm?.provider||'—'}</div><div class="txt" style="font-size:0.6rem">LLMプロバイダー</div></div>
+    <div class="mini-card"><div class="num">v8</div><div class="txt">バージョン</div></div>
+  `;
+  document.getElementById('statusDot').style.background = isHealthy ? 'var(--green)' : 'var(--red)';
+  document.getElementById('statusText').textContent = isHealthy ? 'オンライン' : 'エラー';
+}
+
+// Voice
+let recognition = null;
+let isListening = false;
+
+function toggleVoice() {
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    document.getElementById('voiceStatus').textContent = '⚠️ お使いのブラウザは音声認識に対応していません';
+    return;
+  }
+  if (isListening) { stopVoice(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+
+  recognition.onstart = () => {
+    isListening = true;
+    document.getElementById('voiceBtn').className = 'voice-btn listening';
+    document.getElementById('voiceBtn').textContent = '🔴 聴いています…';
+    document.getElementById('voiceStatus').textContent = '話しかけてください';
+  };
+  recognition.onresult = (e) => {
+    const text = e.results[0][0].transcript;
+    document.getElementById('voiceStatus').textContent = `認識: ${text}`;
+    if (e.results[0].isFinal) {
+      document.getElementById('chatInput').value = text;
+      sendChat();
+    }
+  };
+  recognition.onerror = (e) => {
+    document.getElementById('voiceStatus').textContent = `エラー: ${e.error}`;
+    stopVoice();
+  };
+  recognition.onend = () => stopVoice();
+  recognition.start();
+}
+
+function stopVoice() {
+  isListening = false;
+  if (recognition) recognition.stop();
+  document.getElementById('voiceBtn').className = 'voice-btn';
+  document.getElementById('voiceBtn').textContent = '🎙️ 音声入力を開始';
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  log(`📨 送信: ${text}`);
+  const d = await apiPost('/voice/parse', { text });
+  if (d) log(`🎯 コマンド: ${d.type} — "${d.original_text}"`);
+
+  const sp = await apiPost('/voice/speak', { text: `了解しました。「${text}」を処理します。` });
+  if (sp && sp.voice_params && !sp.voice_params.muted && 'speechSynthesis' in window) {
+    const utter = new SpeechSynthesisUtterance(sp.text);
+    utter.lang = sp.voice_params.lang;
+    utter.rate = sp.voice_params.rate;
+    utter.pitch = sp.voice_params.pitch;
+    utter.volume = sp.voice_params.volume;
+    speechSynthesis.speak(utter);
+  }
+}
+
+// Clock
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleString('ja-JP');
+}
+
+// Init
+async function refresh() {
+  await Promise.all([
+    loadEmotions(),
+    loadPlugins(),
+    loadSessions(),
+    loadComm(),
+    loadMemory(),
+    loadLLM(),
+    loadSystemOverview(),
+  ]);
+}
+refresh();
+setInterval(refresh, 15000);
+setInterval(updateClock, 1000);
+updateClock();
+</script>
+</body>
+</html>

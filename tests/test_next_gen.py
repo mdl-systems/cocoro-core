@@ -1,4 +1,4 @@
-"""cocoro-core — C-2/C-3/C-4/C-5/C-6/C-7 テスト"""
+"""cocoro-core — C-1/C-2/C-3/C-4/C-5/C-6/C-7/C-8 テスト"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -7,6 +7,7 @@ from personality.emotion_adapter import EmotionBehaviorAdapter
 from personality.multi_user import MultiUserManager, UserSession
 from personality.peer_communication import PersonalityCommunication
 from brain.local_llm import LocalLLMManager
+from personality.voice_interface import VoiceInterface
 
 
 # === C-5: Plugin System ===
@@ -299,3 +300,54 @@ class TestLocalLLMManager:
         stats = await mgr.get_stats()
         assert stats["provider"] == "ollama"
         assert stats["healthy"] is False
+
+
+# === C-8: Voice Interface ===
+class TestVoiceInterface:
+    def setup_method(self):
+        self.voice = VoiceInterface()
+
+    def test_default_params(self):
+        params = self.voice.get_voice_params()
+        assert params["rate"] == 1.0
+        assert params["pitch"] == 1.0
+        assert params["lang"] == "ja-JP"
+        assert params["muted"] is False
+
+    def test_happiness_params(self):
+        params = self.voice.get_voice_params("happiness", 0.8)
+        assert params["rate"] > 1.0
+        assert params["pitch"] > 1.0
+
+    def test_sadness_params(self):
+        params = self.voice.get_voice_params("sadness", 0.7)
+        assert params["rate"] < 1.0
+        assert params["pitch"] < 1.0
+
+    def test_parse_greeting(self):
+        result = self.voice.parse_command("こんにちは")
+        assert result["type"] == "greeting"
+
+    def test_parse_emotion_check(self):
+        result = self.voice.parse_command("今の気持ちを教えて")
+        assert result["type"] == "emotion_check"
+
+    def test_parse_unknown(self):
+        result = self.voice.parse_command("今日の天気は")
+        assert result["type"] == "conversation"
+
+    def test_settings(self):
+        result = self.voice.set_settings(rate=1.5, muted=True)
+        assert result["rate"] == 1.5
+        assert result["muted"] is True
+
+    def test_prepare_speech(self):
+        result = self.voice.prepare_speech("テストメッセージ", "happiness", 0.5)
+        assert result["text"] == "テストメッセージ"
+        assert result["chunk_count"] >= 1
+        assert "voice_params" in result
+
+    def test_stats(self):
+        self.voice.parse_command("こんにちは")
+        stats = self.voice.get_stats()
+        assert stats["commands_processed"] == 1

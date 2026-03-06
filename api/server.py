@@ -53,6 +53,7 @@ from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from brain.local_llm import LocalLLMManager
 from personality.multi_user import MultiUserManager
 from personality.peer_communication import PersonalityCommunication
+from personality.voice_interface import VoiceInterface
 from infra.migration import MigrationRunner
 
 class JsonFormatter(logging.Formatter):
@@ -137,11 +138,12 @@ plugin_registry = None
 local_llm = None
 user_manager = None
 peer_comm = None
+voice = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -1543,6 +1545,52 @@ async def comm_inbox(limit: int = 20, _=Depends(verify_api_key)):
 async def comm_stats(_=Depends(verify_api_key)):
     """通信統計"""
     return peer_comm.get_stats()
+
+
+# === C-8: 音声インターフェース ===
+voice = VoiceInterface()
+
+@app.post("/voice/parse")
+async def voice_parse(body: dict, _=Depends(verify_api_key)):
+    """音声コマンド解析"""
+    return voice.parse_command(body.get("text", ""))
+
+@app.post("/voice/speak")
+async def voice_speak(body: dict, _=Depends(verify_api_key)):
+    """テキスト読み上げ準備"""
+    return voice.prepare_speech(
+        body.get("text", ""),
+        body.get("emotion", "neutral"),
+        body.get("intensity", 0.0),
+    )
+
+@app.get("/voice/settings")
+async def voice_settings(_=Depends(verify_api_key)):
+    """音声設定取得"""
+    return voice.get_settings()
+
+@app.post("/voice/settings")
+async def voice_settings_update(body: dict, _=Depends(verify_api_key)):
+    """音声設定変更"""
+    return voice.set_settings(**body)
+
+@app.get("/voice/stats")
+async def voice_stats(_=Depends(verify_api_key)):
+    """音声統計"""
+    return voice.get_stats()
+
+
+# === C-1: ダッシュボードUI ===
+import pathlib
+from fastapi.responses import HTMLResponse
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """ダッシュボードUI"""
+    html_path = pathlib.Path(__file__).parent / "static" / "dashboard.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 
 @app.get("/org/report")
