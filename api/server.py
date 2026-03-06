@@ -30,6 +30,7 @@ from personality.growth_tracker import GrowthTracker
 from agent.webhook.notifier import WebhookNotifier
 from agent.task_queue import TaskQueue
 from agent.event_bus import EventBus
+from agent.organization.manager import OrganizationManager
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -72,11 +73,12 @@ growth = None
 webhook = WebhookNotifier()
 task_queue = None
 event_bus = None
+org = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -89,6 +91,7 @@ async def lifespan(app: FastAPI):
     worker = WorkerManager(llm, router, db_pool, task_queue=task_queue, event_bus=event_bus)
     consolidation = MemoryConsolidation(memory, personality, llm)
     growth = GrowthTracker(db_pool)
+    org = OrganizationManager(db_pool, event_bus)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -99,8 +102,18 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Event: task failed — {data.get('task_id', '')[:8]}")
         await webhook.notify_error("task_failed", data.get('error', 'unknown'))
 
+    async def _on_task_done_track(data):
+        agent = data.get('agent', 'dev')
+        await org.record_task_completion(agent, 0, success=True)
+
+    async def _on_task_fail_track(data):
+        agent = data.get('agent', 'dev')
+        await org.record_task_completion(agent, 0, success=False)
+
     event_bus.subscribe("task.completed", _on_task_completed)
+    event_bus.subscribe("task.completed", _on_task_done_track)
     event_bus.subscribe("task.failed", _on_task_failed)
+    event_bus.subscribe("task.failed", _on_task_fail_track)
     await event_bus.start_listener()
 
     # バックグラウンドWorker開始
@@ -516,3 +529,56 @@ async def growth_report(_=Depends(verify_api_key)):
 async def growth_timeline(limit: int = 20, _=Depends(verify_api_key)):
     """人格進化のタイムライン"""
     return {"timeline": await growth.get_evolution_timeline(limit)}
+
+
+# === v7: Organization (AI組織) ===
+@app.get("/org/report")
+async def org_report(_=Depends(verify_api_key)):
+    """組織レポート"""
+    return await org.get_org_report()
+
+@app.get("/org/departments")
+async def org_departments(_=Depends(verify_api_key)):
+    """部門一覧"""
+    return {"departments": await org.list_departments()}
+
+@app.get("/org/agents")
+async def org_agents(_=Depends(verify_api_key)):
+    """Agent一覧（詳細）"""
+    return {"agents": await org.list_agents()}
+
+class AgentRegReq(BaseModel):
+    agent_type: str
+    display_name: str
+    role: str = "worker"
+    capabilities: list[str] = []
+    department: str | None = None
+
+@app.post("/org/agents/register")
+async def register_agent(req: AgentRegReq, _=Depends(verify_api_key)):
+    """新しいAgentを組織に登録"""
+    try:
+        agent = await org.register_agent(
+            agent_type=req.agent_type, display_name=req.display_name,
+            role=req.role, capabilities=req.capabilities,
+            department=req.department)
+        return {"status": "registered", "agent": agent}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+class DelegateReq(BaseModel):
+    task_id: str
+    from_agent: str
+    to_agent: str
+    reason: str = ""
+
+@app.post("/org/delegate")
+async def delegate_task(req: DelegateReq, _=Depends(verify_api_key)):
+    """タスクを別Agentに委任"""
+    try:
+        result = await org.delegate_task(
+            task_id=req.task_id, from_agent=req.from_agent,
+            to_agent=req.to_agent, reason=req.reason)
+        return {"status": "delegated", "delegation": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

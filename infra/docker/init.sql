@@ -147,6 +147,61 @@ CREATE TRIGGER tasks_updated BEFORE UPDATE ON tasks
 CREATE INDEX idx_task_status ON tasks(status);
 
 -- ============================================
+-- v7: Organization — 部門・役職・Agent登録
+-- ============================================
+CREATE TABLE departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    manager_agent TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE agent_registry (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_type TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    role TEXT DEFAULT 'worker' CHECK (role IN ('manager', 'lead', 'worker', 'specialist')),
+    department_id UUID REFERENCES departments(id) ON DELETE SET NULL,
+    capabilities TEXT[] DEFAULT '{}',
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'busy')),
+    tasks_completed INTEGER DEFAULT 0,
+    tasks_failed INTEGER DEFAULT 0,
+    avg_response_time_ms INTEGER DEFAULT 0,
+    last_active_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TRIGGER agent_registry_updated BEFORE UPDATE ON agent_registry
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+CREATE TABLE task_delegations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 初期Agent登録
+INSERT INTO departments (name, description, manager_agent) VALUES
+    ('engineering', '開発・技術部門', 'dev'),
+    ('sales', '営業・顧客対応部門', 'sales'),
+    ('marketing', 'マーケティング・広報部門', 'marketing');
+
+INSERT INTO agent_registry (agent_type, display_name, role, capabilities, department_id) VALUES
+    ('dev', 'Dev Agent', 'lead',
+     ARRAY['コード生成','API設計','バグ修正','コードレビュー','DB設計','テスト作成'],
+     (SELECT id FROM departments WHERE name='engineering')),
+    ('sales', 'Sales Agent', 'lead',
+     ARRAY['提案書作成','見積作成','顧客分析','商談戦略','KPI分析'],
+     (SELECT id FROM departments WHERE name='sales')),
+    ('marketing', 'Marketing Agent', 'lead',
+     ARRAY['コンテンツ企画','SNS運用','広告運用','SEO','ブランディング','データ分析'],
+     (SELECT id FROM departments WHERE name='marketing'));
+
+-- ============================================
 -- Vector Memory (pgvector + pg_trgm)
 -- ============================================
 CREATE TABLE knowledge_store (
