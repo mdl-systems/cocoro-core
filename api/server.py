@@ -45,6 +45,7 @@ from evolution.intelligence import IntelligenceExpansionEngine
 from evolution.safety import SafetyLayer
 from personality.cognitive_profile import CognitiveProfileEngine
 from personality.calibration import PersonalityCalibrationEngine
+from personality.clone_engine import PersonalityCloneEngine
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -102,11 +103,12 @@ intelligence = None
 safety = None
 cognitive = None
 calibration = None
+clone_engine = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -135,6 +137,7 @@ async def lifespan(app: FastAPI):
     safety = SafetyLayer(db_pool)
     cognitive = CognitiveProfileEngine(db_pool)
     calibration = PersonalityCalibrationEngine(db_pool, llm)
+    clone_engine = PersonalityCloneEngine(db_pool)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -1025,6 +1028,25 @@ async def v2_status(_=Depends(verify_api_key)):
             "life_narrative": True,
         },
     }
+
+
+# === Personality Clone (v4: Identity Layer) ===
+@app.get("/clone/backup")
+async def clone_backup(_=Depends(verify_api_key)):
+    """人格の完全バックアップ"""
+    return await clone_engine.backup()
+
+@app.post("/clone/restore")
+async def clone_restore(req: Request, _=Depends(verify_api_key)):
+    """バックアップからの人格復元"""
+    data = await req.json()
+    return await clone_engine.restore(data)
+
+@app.post("/clone/diff")
+async def clone_diff(req: Request, _=Depends(verify_api_key)):
+    """現在の人格とバックアップの差分"""
+    data = await req.json()
+    return await clone_engine.get_diff(data)
 
 
 # === v7: Organization (AI組織) ===
