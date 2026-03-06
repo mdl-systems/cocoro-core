@@ -43,6 +43,8 @@ from evolution.meta_cognition import MetaCognitionEngine
 from evolution.value_scoring import ValueScoringEngine
 from evolution.intelligence import IntelligenceExpansionEngine
 from evolution.safety import SafetyLayer
+from personality.cognitive_profile import CognitiveProfileEngine
+from personality.calibration import PersonalityCalibrationEngine
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -98,11 +100,13 @@ meta_cognition = None
 value_scoring = None
 intelligence = None
 safety = None
+cognitive = None
+calibration = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -129,6 +133,8 @@ async def lifespan(app: FastAPI):
     value_scoring = ValueScoringEngine(db_pool, llm)
     intelligence = IntelligenceExpansionEngine(db_pool)
     safety = SafetyLayer(db_pool)
+    cognitive = CognitiveProfileEngine(db_pool)
+    calibration = PersonalityCalibrationEngine(db_pool, llm)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -968,6 +974,56 @@ async def v5_full_report(_=Depends(verify_api_key)):
         "intelligence": intel,
         "safety": safe,
         "self_awareness": awareness,
+    }
+
+
+# === Cognitive Profile (v2: 認知スタイル + リスク) ===
+@app.get("/personality/cognitive")
+async def get_cognitive_profile(_=Depends(verify_api_key)):
+    """認知プロファイル (Cognitive Style + Risk Profile)"""
+    return await cognitive.analyze()
+
+
+# === Personality Calibration (v2.5: 人格一致率テスト) ===
+@app.post("/calibration/start")
+async def start_calibration(_=Depends(verify_api_key)):
+    """キャリブレーション開始 (50問)"""
+    return await calibration.start_calibration()
+
+class CalibrationAnswers(BaseModel):
+    session_id: str
+    answers: dict
+
+@app.post("/calibration/submit")
+async def submit_calibration(req: CalibrationAnswers, _=Depends(verify_api_key)):
+    """キャリブレーション回答提出"""
+    int_answers = {int(k): int(v) for k, v in req.answers.items()}
+    return await calibration.submit_answers(req.session_id, int_answers)
+
+@app.get("/calibration/history")
+async def calibration_history(_=Depends(verify_api_key)):
+    """キャリブレーション履歴"""
+    return {"history": await calibration.get_calibration_history()}
+
+@app.get("/v2/status")
+async def v2_status(_=Depends(verify_api_key)):
+    """v2/v2.5 人格形成ステータス"""
+    cog = await cognitive.analyze()
+    cal_history = await calibration.get_calibration_history()
+    return {
+        "version": "2.5",
+        "cognitive_profile": cog,
+        "calibration_history": cal_history[:3],
+        "eight_elements": {
+            "identity": True,
+            "values": True,
+            "beliefs": True,
+            "goals": True,
+            "cognitive_style": cog["cognitive_style"]["style"],
+            "risk_profile": cog["risk_profile"]["profile"],
+            "emotional_profile": True,
+            "life_narrative": True,
+        },
     }
 
 
