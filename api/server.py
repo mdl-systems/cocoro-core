@@ -663,6 +663,13 @@ async def growth_timeline(limit: int = 20, _=Depends(verify_api_key)):
 
 
 # === Emotion (感情エンジン) ===
+@app.get("/emotion")
+async def emotion_current(_=Depends(verify_api_key)):
+    """現在の感情状態（詳細）"""
+    state = await personality.emotion.get_state()
+    prompt = await personality.emotion.to_prompt()
+    return {**state.to_dict(), "prompt": prompt}
+
 @app.get("/emotion/state")
 async def emotion_state(_=Depends(verify_api_key)):
     """現在の感情状態を取得"""
