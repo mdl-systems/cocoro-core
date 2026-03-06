@@ -68,7 +68,7 @@ class EmotionState:
         return dominant
 
     def to_dict(self) -> dict:
-        d = asdict(self)
+        d = {k: round(v, 3) for k, v in asdict(self).items()}
         d["dominant"] = self.dominant()
         return d
 

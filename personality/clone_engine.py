@@ -72,24 +72,24 @@ class PersonalityCloneEngine:
                     "philosophy": str(identity["philosophy"]) if identity else "",
                 },
                 "values": [
-                    {"name": str(v["name"]), "weight": float(v["weight"]),
+                    {"name": str(v["name"]), "weight": round(float(v["weight"]), 3),
                      "category": str(v["category"]), "description": str(v["description"])}
                     for v in values
                 ],
                 "beliefs": [
                     {"statement": str(b["statement"]),
-                     "confidence": float(b["confidence"]),
+                     "confidence": round(float(b["confidence"]), 3),
                      "source": str(b["source"]),
                      "evidence_count": int(b["evidence_count"])}
                     for b in beliefs
                 ],
                 "emotion": {
-                    "happiness": float(emotion["happiness"]) if emotion else 0.5,
-                    "sadness": float(emotion["sadness"]) if emotion else 0.1,
-                    "anger": float(emotion["anger"]) if emotion else 0.0,
-                    "fear": float(emotion["fear"]) if emotion else 0.1,
-                    "surprise": float(emotion["surprise"]) if emotion else 0.2,
-                    "trust": float(emotion["trust"]) if emotion else 0.6,
+                    "happiness": round(float(emotion["happiness"]), 3) if emotion else 0.5,
+                    "sadness": round(float(emotion["sadness"]), 3) if emotion else 0.1,
+                    "anger": round(float(emotion["anger"]), 3) if emotion else 0.0,
+                    "fear": round(float(emotion["fear"]), 3) if emotion else 0.1,
+                    "surprise": round(float(emotion["surprise"]), 3) if emotion else 0.2,
+                    "trust": round(float(emotion["trust"]), 3) if emotion else 0.6,
                 },
                 "goals": [
                     {"title": str(g["title"]), "description": str(g["description"]),
@@ -98,7 +98,7 @@ class PersonalityCloneEngine:
                     for g in goals
                 ],
                 "ideal_profile": ideal_profile,
-                "sync_rate": float(sync["sync_rate"]) if sync else None,
+                "sync_rate": round(float(sync["sync_rate"]), 3) if sync else None,
             }
 
             # バックアップ記録
