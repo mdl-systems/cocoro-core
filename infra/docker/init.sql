@@ -5,6 +5,7 @@
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+CREATE EXTENSION IF NOT EXISTS "vector";
 
 CREATE OR REPLACE FUNCTION update_timestamp() RETURNS TRIGGER AS $$
 BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
@@ -116,7 +117,7 @@ CREATE TRIGGER decision_updated BEFORE UPDATE ON decision_log
 -- ============================================
 CREATE TABLE learning_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source TEXT NOT NULL CHECK (source IN ('conversation', 'decision', 'task', 'reflection', 'external')),
+    source TEXT NOT NULL CHECK (source IN ('conversation', 'decision', 'task', 'reflection', 'external', 'decision_reflection')),
     source_id UUID,
     lesson TEXT NOT NULL,
     category TEXT DEFAULT 'general',
@@ -146,17 +147,19 @@ CREATE TRIGGER tasks_updated BEFORE UPDATE ON tasks
 CREATE INDEX idx_task_status ON tasks(status);
 
 -- ============================================
--- Vector Memory (簡易版 — pg_trgm利用)
+-- Vector Memory (pgvector + pg_trgm)
 -- ============================================
 CREATE TABLE knowledge_store (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT NOT NULL,
+    embedding vector(768),
     category TEXT DEFAULT 'general',
     source TEXT DEFAULT 'manual',
     metadata TEXT DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_knowledge_content ON knowledge_store USING gin(content gin_trgm_ops);
+CREATE INDEX idx_knowledge_embedding ON knowledge_store USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
 
 -- ============================================
 -- 初期データ
