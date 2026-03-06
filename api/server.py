@@ -195,18 +195,40 @@ async def lifespan(app: FastAPI):
     await worker.start_worker(num_workers=2)
     logger.info("Task workers: 2 started")
 
-    # Consolidation定期実行スケジューラ
-    scheduler_task = None
+    # B-7: 統合スケジューラ（Consolidation + Emotion Decay + Sync Rate）
+    scheduler_tasks = []
     interval_hours = int(os.getenv("CONSOLIDATION_INTERVAL_HOURS", "6"))
     if interval_hours > 0:
-        scheduler_task = asyncio.create_task(_consolidation_scheduler(interval_hours))
-        logger.info(f"Consolidation scheduler: every {interval_hours}h")
+        scheduler_tasks.append(asyncio.create_task(
+            _consolidation_scheduler(interval_hours)))
+        logger.info(f"Scheduler: consolidation every {interval_hours}h")
+
+    # 感情自動 decay（1時間ごと）
+    decay_interval = int(os.getenv("EMOTION_DECAY_INTERVAL_HOURS", "1"))
+    if decay_interval > 0:
+        scheduler_tasks.append(asyncio.create_task(
+            _emotion_decay_scheduler(decay_interval)))
+        logger.info(f"Scheduler: emotion decay every {decay_interval}h")
+
+    # シンクロ率定期記録（12時間ごと）
+    sync_interval = int(os.getenv("SYNC_RECORD_INTERVAL_HOURS", "12"))
+    if sync_interval > 0:
+        scheduler_tasks.append(asyncio.create_task(
+            _sync_rate_scheduler(sync_interval)))
+        logger.info(f"Scheduler: sync rate record every {sync_interval}h")
+
+    # 自己観察レポート（24時間ごと）
+    observe_interval = int(os.getenv("OBSERVATION_REPORT_INTERVAL_HOURS", "24"))
+    if observe_interval > 0:
+        scheduler_tasks.append(asyncio.create_task(
+            _observation_report_scheduler(observe_interval)))
+        logger.info(f"Scheduler: observation report every {observe_interval}h")
 
     logger.info("=== cocoro-core started ===")
     yield
     await event_bus.stop()
-    if scheduler_task:
-        scheduler_task.cancel()
+    for t in scheduler_tasks:
+        t.cancel()
     await db_pool.close()
     logger.info("=== cocoro-core stopped ===")
 
@@ -226,6 +248,68 @@ async def _consolidation_scheduler(interval_hours: int):
         except Exception as e:
             logger.error(f"[Scheduler] Consolidation failed: {e}")
             await webhook.notify_error("consolidation", str(e))
+
+
+async def _emotion_decay_scheduler(interval_hours: int):
+    """定期的に感情を自然減衰させる"""
+    await asyncio.sleep(120)  # 起動2分後から
+    while True:
+        try:
+            await asyncio.sleep(interval_hours * 3600)
+            state = personality.emotion.get_state()
+            if state.intensity > 0.05:
+                personality.emotion.decay()
+                new_state = personality.emotion.get_state()
+                logger.info(f"[Scheduler] Emotion decay: {state.dominant}({state.intensity:.2f}) → {new_state.dominant}({new_state.intensity:.2f})")
+                await webhook.notify("emotion_decay", {
+                    "summary": f"感情自然減衰: {state.dominant} → {new_state.dominant}",
+                    "before_intensity": round(state.intensity, 3),
+                    "after_intensity": round(new_state.intensity, 3),
+                })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Scheduler] Emotion decay failed: {e}")
+
+
+async def _sync_rate_scheduler(interval_hours: int):
+    """定期的にシンクロ率を記録"""
+    await asyncio.sleep(180)  # 起動3分後から
+    while True:
+        try:
+            await asyncio.sleep(interval_hours * 3600)
+            sync_data = await growth.calculate_sync_rate()
+            await growth.record_sync_rate(sync_data.get("sync_rate", 0))
+            logger.info(f"[Scheduler] Sync rate recorded: {sync_data.get('sync_rate', 0):.1f}%")
+            await webhook.notify("sync_rate", {
+                "summary": f"シンクロ率記録: {sync_data.get('sync_rate', 0):.1f}%",
+                "sync_rate": sync_data.get("sync_rate", 0),
+            })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Scheduler] Sync rate recording failed: {e}")
+
+
+async def _observation_report_scheduler(interval_hours: int):
+    """定期的に自己観察レポートをWebhookに送信"""
+    await asyncio.sleep(300)  # 起動5分後から
+    while True:
+        try:
+            await asyncio.sleep(interval_hours * 3600)
+            stats = await observer.get_stats()
+            total = stats.get("total_observations", 0)
+            if total > 0:
+                await webhook.notify("observation_report", {
+                    "summary": f"自己観察レポート: {total}件の観察",
+                    "total": total,
+                    "by_type": stats.get("by_type", {}),
+                })
+                logger.info(f"[Scheduler] Observation report sent: {total} observations")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Scheduler] Observation report failed: {e}")
 
 
 app = FastAPI(title="cocoro-core", version="1.0.0",
