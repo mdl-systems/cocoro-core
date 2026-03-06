@@ -5,6 +5,7 @@ Personality AI Operating System
 import os
 import sys
 import uuid
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -56,10 +57,35 @@ async def lifespan(app: FastAPI):
     worker = WorkerManager(llm, router, db_pool)
     consolidation = MemoryConsolidation(memory, personality, llm)
     growth = GrowthTracker(db_pool)
+
+    # Consolidation定期実行スケジューラ
+    scheduler_task = None
+    interval_hours = int(os.getenv("CONSOLIDATION_INTERVAL_HOURS", "6"))
+    if interval_hours > 0:
+        scheduler_task = asyncio.create_task(_consolidation_scheduler(interval_hours))
+        logger.info(f"Consolidation scheduler: every {interval_hours}h")
+
     logger.info("=== cocoro-core started ===")
     yield
+    if scheduler_task:
+        scheduler_task.cancel()
     await db_pool.close()
     logger.info("=== cocoro-core stopped ===")
+
+
+async def _consolidation_scheduler(interval_hours: int):
+    """定期的に記憶定着を実行（人格の自動成長）"""
+    await asyncio.sleep(60)  # 起動後1分待ってから開始
+    while True:
+        try:
+            await asyncio.sleep(interval_hours * 3600)
+            logger.info("[Scheduler] Consolidation starting...")
+            result = await consolidation.consolidate()
+            logger.info(f"[Scheduler] Consolidation done: {result.get('status', 'unknown')}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Scheduler] Consolidation failed: {e}")
 
 
 app = FastAPI(title="cocoro-core", version="1.0.0",
