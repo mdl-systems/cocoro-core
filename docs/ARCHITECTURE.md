@@ -3,7 +3,7 @@
 > AI に「人格」を持たせるOS。LLMは「声帯」に過ぎない。  
 > 人格の一貫性は Memory + Values + Emotion + Decision Graph で保証する。
 
-**Stats:** 46 modules / 91 API endpoints / 24 DB tables / 86 tests
+**Stats:** 52 modules / 121+ API endpoints / 24 DB tables / 133 tests
 
 ---
 
@@ -11,6 +11,14 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
+│ Layer 11: Dashboard & Voice (UI/UX)                             │
+│  ┌──────────────┐  ┌──────────────┐                            │
+│  │Dashboard UI  │  │Voice         │                            │
+│  │(/dashboard)  │  │Interface     │                            │
+│  │リアルタイム   │  │(Web Speech   │                            │
+│  │全機能可視化   │  │ API連携)     │                            │
+│  └──────────────┘  └──────────────┘                            │
+├─────────────────────────────────────────────────────────────────┤
 │ Layer 10: External Interface (API Gateway)                      │
 │  ┌──────────┐                                                   │
 │  │ FastAPI   │  POST /chat     POST /think     POST /decide     │
@@ -18,7 +26,9 @@
 │  │  Nginx    │  GET  /health   GET  /emotion   GET  /clone/*    │
 │  │  :8001    │  GET  /growth/* GET  /evolve/*  GET  /calibrate  │
 │  │           │  POST /boot/*   POST /test/*    GET  /decide/... │
-│  └─────┬────┘  91 endpoints                                    │
+│  │           │  GET  /plugins  POST /voice/*   GET  /llm/*      │
+│  │           │  POST /users/*  POST /comm/*    GET  /dashboard  │
+│  └─────┬────┘  121+ endpoints                                  │
 ├────────┼────────────────────────────────────────────────────────┤
 │ Layer 9: Governance (倫理・安全)                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
@@ -56,8 +66,18 @@
 │    (記憶検索) (価値観) (感情バイアス警告)  (統合判断)              │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────┐       │
-│  │ LLM Runtime (Gemini 2.5 Flash Lite / Ollama)       │       │
+│  │ LLM Runtime (Gemini 2.5 Flash / Ollama)            │       │
 │  │   ・通常生成  ・Function Calling  ・Rate Limiter     │       │
+│  │                                                     │       │
+│  │ Local LLM Manager (C-4)                             │       │
+│  │   ・モデル管理  ・ヘルスチェック  ・FC エミュレーション │       │
+│  │   ・Ollama API  ・モデル切り替え  ・自動フォールバック │       │
+│  └─────────────────────────────────────────────────────┘       │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────┐       │
+│  │ Plugin System (C-5)                                 │       │
+│  │   ・動的プラグイン登録  ・math/time/format/random    │       │
+│  │   ・有効/無効切替      ・ツール定義自動生成          │       │
 │  └─────────────────────────────────────────────────────┘       │
 ├─────────────────────────────────────────────────────────────────┤
 │ Layer 5: Evolution (自己進化)                                    │
@@ -85,6 +105,13 @@
 │  │(目標)   │ │(成長)   │ │(バック │ │(校正)    │ │(認知)   │  │
 │  │        │ │+Sync%  │ │ アップ) │ │          │ │         │  │
 │  └────────┘ └────────┘ └─────────┘ └──────────┘ └────────┘  │
+│                                                                 │
+│  ┌────────────────┐ ┌────────────────┐ ┌──────────────────┐   │
+│  │Emotion Behavior│ │Multi-User      │ │Peer              │   │
+│  │Adapter (C-6)   │ │Manager (C-2)   │ │Communication(C-3)│   │
+│  │感情→行動パラメ │ │セッション管理   │ │人格間コミュ       │   │
+│  │ータ変換        │ │プリファレンス   │ │ニケーション       │   │
+│  └────────────────┘ └────────────────┘ └──────────────────┘   │
 │              Personality Engine + Consolidation                  │
 │     (6要素統合 + Emotion→Chat連動 + 記憶統合 → 人格進化)         │
 ├─────────────────────────────────────────────────────────────────┤
@@ -94,12 +121,21 @@
 │  │ (Redis)  │  │(Postgres)│  │ (pgvector)   │                │
 │  │ 会話履歴  │  │ 全記録    │  │ 意味検索     │                │
 │  └──────────┘  └──────────┘  └──────────────┘                │
+│  ┌──────────────────────────────────────────┐                  │
+│  │ Memory Archiver (C-7)                    │                  │
+│  │   ・自動アーカイブ  ・重複検出  ・統計    │                  │
+│  └──────────────────────────────────────────┘                  │
 ├─────────────────────────────────────────────────────────────────┤
 │ Layer 2: Infrastructure                                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐                │
 │  │PostgreSQL│  │  Redis   │  │  Docker      │                │
 │  │  + pg    │  │ (Cache/  │  │  Compose     │                │
 │  │  vector  │  │  Queue)  │  │              │                │
+│  └──────────┘  └──────────┘  └──────────────┘                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────┐                │
+│  │Migration │  │CORS      │  │Structured    │                │
+│  │Runner    │  │Middleware │  │JSON Logging  │                │
+│  │(A-5)     │  │(A-4)     │  │(A-6)         │                │
 │  └──────────┘  └──────────┘  └──────────────┘                │
 ├─────────────────────────────────────────────────────────────────┤
 │ Layer 1: OS       (Debian 13)                                   │
@@ -117,26 +153,39 @@
 - 人格の一貫性は LLM の外側（Memory + Values + Emotion + Decision Graph）で保証
 - AI は経験を通じて成長する（Memory Consolidation → Personality Evolution）
 - 感情は判断とトーンに連続的に影響する（6次元感情モデル）
+- 感情は行動パラメータにも変換される（C-6: Emotion→Behavior Adapter）
 - 組織として複数Agentが協調し、専門性を発揮する
+- 複数のcocoro人格が協議で合意形成できる（C-3: Peer Communication）
 - 倫理的制約はGovernance層で強制する
+- マルチユーザーを個別セッションで分離管理する（C-2）
+- 音声で対話可能、感情が声のトーンに反映される（C-8）
 
 ---
 
 ## Data Flow
 
 ```
-User Input
+User Input (テキスト or 音声)
   │
-  ├─[1] Short-Term Memory に保存 (Redis)
+  ├─[0] Voice Interface: 音声認識 → コマンド解析 (C-8)
+  │
+  ├─[1] Multi-User: セッション取得/作成 (C-2)
+  │     ユーザー固有プリファレンス適用
+  │
+  ├─[2] Short-Term Memory に保存 (Redis)
   │     Long-Term Memory に保存 (PostgreSQL + emotion付き)
   │
-  ├─[2] Governance: 入力の倫理チェック → 不適切ならブロック
+  ├─[3] Governance: 入力の倫理チェック → 不適切ならブロック
   │
   ▼
 Decision Graph (入力分類 + 感情分析)
   │
   ├── Emotion Engine: ユーザー感情 → 6次元パラメータ更新
   │     happiness, sadness, anger, fear, trust, surprise
+  │     │
+  │     └── Emotion Behavior Adapter (C-6)
+  │           → 行動パラメータ変換 (創造性/リスク許容/饒舌度/共感力)
+  │           → 判断閾値調整 + 応答修飾生成
   │
   ├── chat ──────→ Function Calling Engine (マルチツール連鎖)
   │   │             │ Step1: LLM → ツール判断 → 実行
@@ -144,6 +193,8 @@ Decision Graph (入力分類 + 感情分析)
   │   │             │ Step3: テキスト応答生成
   │   │             ▼
   │   │           Response (ツール結果統合)
+  │   │             │
+  │   │             └── Plugin System (C-5): 拡張ツール実行
   │   │
   │   └── System Prompt = Personality(6要素) + Emotion Tone Directive
   │        └── Creative Friction (シンクロ率 > 85% で独立性維持)
@@ -162,11 +213,23 @@ Decision Graph (入力分類 + 感情分析)
   └── learn ─────→ Learning Log → Personality 更新
   │
   ▼
+Response Generation
+  │
+  ├── Voice Interface: 感情→音声パラメータ変換 (C-8)
+  │     rate/pitch/volume が感情に連動
+  │
+  ├── Peer Communication: 必要に応じて他人格と協議 (C-3)
+  │
+  ├── Dashboard: リアルタイム更新 (C-1)
+  │
+  ▼
 Memory Storage (Long-Term + emotion metadata)
   │
   ├── Self Observation: 会話・判断・感情変化を記録
   │
   ├── Emotion Decay: 自然な感情減衰（会話ごと）
+  │
+  ├── Memory Archiver: 古い記憶の自動整理 (C-7)
   │
   ▼ (6時間ごと)
 Memory Consolidation → Personality Evolution (人格成長)
@@ -208,6 +271,17 @@ Chat統合:
   ・fear      → 回避バイアス警告
   ・trust     → 信頼過多バイアス警告
   ・surprise  → 新奇性バイアス警告
+
+行動適応 (C-6):
+  感情 → creativity_boost / risk_tolerance / verbosity /
+          empathy_level / response_tone / decision_speed
+  例: happiness → 創造性↑ リスク許容↑ 饒舌↑
+      fear      → 創造性↓ リスク許容↓ 共感↑
+
+音声パラメータ (C-8):
+  感情 → rate / pitch / volume
+  例: happiness → rate 1.1 / pitch 1.15 / volume 0.9
+      sadness   → rate 0.85 / pitch 0.85 / volume 0.6
 ```
 
 ---
@@ -243,7 +317,7 @@ Stage 4: Decision (統合判断)
 
 AIが自律的にツールを選択・連鎖実行する。最大3ツール連鎖対応。
 
-### 利用可能ツール（10ツール）
+### 利用可能ツール（10ツール + プラグイン）
 
 | # | ツール名 | 用途 | 引数 |
 |---|---|---|---|
@@ -257,6 +331,17 @@ AIが自律的にツールを選択・連鎖実行する。最大3ツール連�
 | 8 | `add_schedule` | スケジュール追加 | `title`, `start_at`, `end_at`, `reminder_minutes` |
 | 9 | `list_schedules` | スケジュール一覧 | `days` |
 | 10 | `list_recent_tasks` | タスク一覧 | `status` |
+
+### Plugin System (C-5)
+
+動的に追加可能なプラグインシステム。ビルトイン4種：
+
+| Plugin | 機能 | 例 |
+|---|---|---|
+| `math` | 数式計算 | `2+3*4` → `14` |
+| `time` | 日時情報 | 現在時刻、日付計算 |
+| `format` | テキスト整形 | JSON/CSV変換 |
+| `random` | 乱数生成 | ランダム選択、サイコロ |
 
 ---
 
@@ -276,6 +361,122 @@ AIが自律的にツールを選択・連鎖実行する。最大3ツール連�
 Creative Friction:
   sync > 85% → AIが建設的に反論する指示をsystem promptに注入
   → 「イエスマン化」を防ぎ、AI固有の視点を維持
+```
+
+---
+
+## Multi-User Support (C-2)
+
+```
+セッション管理:
+  ・ユーザーごとのセッション自動作成/取得
+  ・セッションID (8文字ハッシュ)
+  ・自動期限切れ (デフォルト60分)
+  ・メッセージカウント追跡
+
+プリファレンス:
+  ・ユーザーごとの設定保存 (tone, language 等)
+  ・プロンプトプレフィックス自動生成
+  ・コンテキスト分離
+
+統計:
+  ・アクティブセッション数
+  ・総メッセージ数
+  ・ユーザー別アクティビティ
+```
+
+---
+
+## Peer Communication (C-3)
+
+```
+人格間コミュニケーションプロトコル:
+  ・複数 cocoro 人格が協議で意思決定
+  ・ピア登録 (ID, 名前, エンドポイント, 人格要約)
+  ・ピア解除
+
+Discussion (協議セッション):
+  ・トピックベースの協議開始
+  ・意見追加 (stance: agree/disagree/neutral/question)
+  ・結論付け + コンセンサスプロンプト生成
+  ・協議ステータス管理 (active/concluded)
+
+ダイレクトメッセージ:
+  ・人格間の直接通信
+  ・受信箱管理
+  ・メッセージタイプ分類 (general/urgent/info)
+```
+
+---
+
+## Local LLM Manager (C-4)
+
+```
+Ollama完全統合:
+  ・モデル一覧 (GET /api/tags)
+  ・モデル切り替え
+  ・モデル詳細情報 (パラメータ, テンプレート)
+  ・ヘルスチェック
+
+Function Calling エミュレーション:
+  ・プロンプトベースでツール定義を埋め込み
+  ・LLM応答からJSON形式のツール呼び出しを解析
+  ・Gemini FC互換インターフェース
+
+フォールバック:
+  ・LLM_PROVIDER=ollama → Ollama優先
+  ・Ollama不可 → Gemini API にフォールバック
+  ・環境変数: OLLAMA_BASE_URL, OLLAMA_MODEL
+```
+
+---
+
+## Voice Interface (C-8)
+
+```
+音声コマンド認識 (10パターン):
+  こんにちは     → greeting
+  感情を教えて   → emotion_check
+  タスクある？   → task_list
+  覚えて         → memory_action
+  設定変更       → settings
+  ありがとう     → gratitude
+  ヘルプ         → help
+  黙って         → mute
+  さようなら     → farewell
+  名前は？       → identity
+
+感情→音声パラメータ変換:
+  neutral   → rate 1.0  / pitch 1.0  / volume 0.8
+  happiness → rate 1.1  / pitch 1.15 / volume 0.9
+  sadness   → rate 0.85 / pitch 0.85 / volume 0.6
+  anger     → rate 1.15 / pitch 1.2  / volume 1.0
+  fear      → rate 1.2  / pitch 1.3  / volume 0.5
+
+ブラウザ連携: Web Speech API (SpeechRecognition + SpeechSynthesis)
+```
+
+---
+
+## Dashboard UI (C-1)
+
+```
+リアルタイムダッシュボード (/dashboard):
+  ・15秒自動更新
+  ・認証付き (API Key)
+  ・ダークモード UI
+
+表示パネル:
+  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+  │ 💗 感情状態   │ │ 🎭 行動適応  │ │ ⚡ システム   │
+  │ 6次元グリッド │ │ バーグラフ   │ │ 概要        │
+  ├─────────────┤ ├─────────────┤ ├─────────────┤
+  │ 🔌 プラグイン │ │ 👥 セッション│ │ 🔗 人格間通信│
+  │ 有効/無効一覧│ │ アクティブ数 │ │ ピア/協議    │
+  ├─────────────┤ ├─────────────┤ ├─────────────┤
+  │ 🧠 メモリ統計│ │ 🎤 音声入力  │ │ 🤖 LLM状態  │
+  │ テーブル行数 │ │ STT + TTS  │ │ Ollama/Gemini│
+  └─────────────┘ └─────────────┘ └─────────────┘
 ```
 
 ---
@@ -302,14 +503,42 @@ Test Bench (200問テスト):
 
 ---
 
+## Production Hardening (Phase A)
+
+```
+A-1/A-2/A-3: 基本安定化
+  ・全テスト通過確認
+  ・エラーハンドリング強化
+  ・float精度正規化
+
+A-4: CORS Middleware
+  ・全オリジン許可 (開発用)
+  ・OPTIONS preflight 対応
+
+A-5: DB Migration Runner
+  ・バージョン管理付きマイグレーション
+  ・起動時自動実行
+  ・手動実行/状態確認 API
+
+A-6: Structured Logging
+  ・JSON形式ログ出力
+  ・RotatingFileHandler (/var/log/cocoro/)
+  ・タイムスタンプ + レベル + ソース
+```
+
+---
+
 ## Directory Structure
 
 ```
-cocoro-core/                        46 modules
+cocoro-core/                        52 modules
 ├── api/
-│   └── server.py                   # FastAPI メインサーバー (91 endpoints)
+│   ├── server.py                   # FastAPI メインサーバー (121+ endpoints)
+│   └── static/
+│       └── dashboard.html          # ダッシュボードUI (C-1)
 ├── brain/
 │   ├── llm_runtime.py              # LLM統合 (Gemini/Ollama, FC, Rate Limiter)
+│   ├── local_llm.py                # ローカルLLM管理 (C-4: Ollama)
 │   ├── reasoning/
 │   │   └── reasoning_engine.py     # 思考エンジン (Chain-of-Thought)
 │   ├── decision_engine/
@@ -317,7 +546,8 @@ cocoro-core/                        46 modules
 │   ├── planner/
 │   │   └── planner.py              # 計画立案エンジン
 │   └── tools/
-│       └── tool_registry.py        # ツール定義 + 実行エンジン (10ツール)
+│       ├── tool_registry.py        # ツール定義 + 実行エンジン (10ツール)
+│       └── plugin_system.py        # プラグインシステム (C-5)
 ├── personality/
 │   ├── personality_engine.py       # 人格統合エンジン (6要素 + 感情トーン)
 │   ├── identity/identity.py        # 自己認識 (名前・役割・性格)
@@ -325,11 +555,15 @@ cocoro-core/                        46 modules
 │   ├── beliefs/belief_system.py    # 信念システム (世界観・原則)
 │   ├── history/life_history.py     # 人格変化履歴
 │   ├── emotion/emotion_engine.py   # 感情エンジン (6次元連続値)
+│   ├── emotion_adapter.py          # 感情→行動適応 (C-6)
 │   ├── goals/goal_engine.py        # 目標管理エンジン
 │   ├── growth_tracker.py           # 成長 + シンクロ率 + 勾配調整
 │   ├── clone_engine.py             # 人格バックアップ/復元/差分
 │   ├── calibration.py              # 人格校正エンジン
 │   ├── cognitive_profile.py        # 認知プロファイル分析
+│   ├── multi_user.py               # マルチユーザー管理 (C-2)
+│   ├── peer_communication.py       # 人格間コミュニケーション (C-3)
+│   ├── voice_interface.py          # 音声インターフェース (C-8)
 │   ├── setup/boot_wizard.py        # 初期設定ウィザード (40問)
 │   └── test/
 │       ├── decision_sampling.py    # 意思決定サンプリング
@@ -339,7 +573,8 @@ cocoro-core/                        46 modules
 │   ├── short_term/short_term.py    # 短期記憶 (Redis)
 │   ├── long_term/long_term.py      # 長期記憶 (PostgreSQL)
 │   ├── vector_memory/vector_memory.py  # ベクトル検索 (pgvector)
-│   └── consolidation.py            # 記憶定期統合 → 人格進化
+│   ├── consolidation.py            # 記憶定期統合 → 人格進化
+│   └── memory_archiver.py          # 長期記憶自動整理 (C-7)
 ├── evolution/
 │   ├── self_observation.py         # 自己観察 (8カテゴリ)
 │   ├── self_evaluation.py          # 自己評価
@@ -359,17 +594,19 @@ cocoro-core/                        46 modules
 │   └── webhook/notifier.py         # 外部通知
 ├── infra/
 │   ├── configs/settings.py         # 設定管理
+│   ├── migration.py                # DBマイグレーション (A-5)
 │   └── docker/
 │       ├── Dockerfile
 │       ├── docker-compose.yml
 │       ├── init.sql                # DB初期化 (24テーブル)
 │       └── nginx.conf
-├── tests/                          # 86テスト (6ファイル)
-│   ├── test_agent.py               # TaskRouter (8)
+├── tests/                          # 133テスト (6ファイル)
+│   ├── test_agent.py               # TaskRouter (13)
 │   ├── test_brain.py               # Planner + Decision + Reasoning + LLM (14)
 │   ├── test_emotion.py             # EmotionState + EmotionEngine (28)
 │   ├── test_growth.py              # cosine_sim + gradient + learning_rate (18)
 │   ├── test_memory.py              # Consolidation parser (4)
+│   ├── test_next_gen.py            # C-2〜C-8 全テスト (42)
 │   └── test_personality.py         # PersonalityEngine + Observation (14)
 ├── docs/
 │   └── ARCHITECTURE.md             # このファイル
@@ -378,7 +615,7 @@ cocoro-core/                        46 modules
 
 ---
 
-## API Endpoints (91 total)
+## API Endpoints (121+ total)
 
 ### Core
 | Method | Path | Description |
@@ -388,6 +625,7 @@ cocoro-core/                        46 modules
 | `POST` | `/decide` | 意思決定 (Memory→Value→Emotion→Decision) |
 | `GET` | `/decide/pipeline` | Decision Pipeline 情報 |
 | `GET` | `/health` | ヘルスチェック |
+| `GET` | `/dashboard` | ダッシュボードUI (C-1) |
 
 ### Memory
 | Method | Path | Description |
@@ -395,6 +633,9 @@ cocoro-core/                        46 modules
 | `GET` | `/memory/search` | 長期記憶検索 |
 | `GET` | `/memory/learnings` | 学習内容一覧 |
 | `POST` | `/memory/consolidate` | 記憶統合トリガー |
+| `GET` | `/memory/stats` | メモリ統計 (C-7) |
+| `POST` | `/memory/archive` | アーカイブ実行 (C-7) |
+| `GET` | `/memory/archive/history` | アーカイブ履歴 (C-7) |
 
 ### Personality
 | Method | Path | Description |
@@ -414,6 +655,9 @@ cocoro-core/                        46 modules
 | `POST` | `/emotion/adjust` | 感情調整 |
 | `GET` | `/emotion/history` | 感情変化履歴 |
 | `POST` | `/emotion/decay` | 手動減衰 |
+| `GET` | `/emotion/adaptation` | 感情→行動適応 (C-6) |
+| `GET` | `/emotion/decision-threshold` | 判断閾値 (C-6) |
+| `GET` | `/emotion/response-modifiers` | 応答修飾 (C-6) |
 
 ### Tasks & Agent
 | Method | Path | Description |
@@ -488,6 +732,61 @@ cocoro-core/                        46 modules
 | `POST` | `/governance/check` | 倫理チェック |
 | `POST` | `/governance/modify` | 変更許可チェック |
 | `GET` | `/governance/report` | ガバナンスレポート |
+
+### Plugins (C-5)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/plugins` | プラグイン一覧 + 統計 |
+| `POST` | `/plugins/execute` | プラグイン実行 |
+| `GET` | `/plugins/tools` | ツール定義一覧 |
+| `GET` | `/plugins/stats` | プラグイン統計 |
+
+### Local LLM (C-4)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/llm/local/models` | モデル一覧 |
+| `GET` | `/llm/local/health` | ヘルスチェック |
+| `POST` | `/llm/local/switch` | モデル切り替え |
+| `GET` | `/llm/local/info` | モデル詳細 |
+| `GET` | `/llm/local/stats` | LLM統計 |
+
+### Multi-User (C-2)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/users/session` | セッション作成/取得 |
+| `DELETE` | `/users/session/{user_id}` | セッション終了 |
+| `GET` | `/users/sessions` | アクティブセッション一覧 |
+| `POST` | `/users/preference` | ユーザー設定保存 |
+| `GET` | `/users/preferences/{user_id}` | ユーザー設定取得 |
+| `GET` | `/users/stats` | ユーザー統計 |
+
+### Peer Communication (C-3)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/comm/peer` | ピア登録 |
+| `GET` | `/comm/peers` | ピア一覧 |
+| `POST` | `/comm/discussion` | 協議開始 |
+| `POST` | `/comm/discussion/{id}/opinion` | 意見追加 |
+| `POST` | `/comm/discussion/{id}/conclude` | 協議結論 |
+| `GET` | `/comm/discussions` | 協議一覧 |
+| `POST` | `/comm/message` | DM送信 |
+| `GET` | `/comm/inbox` | 受信箱 |
+| `GET` | `/comm/stats` | 通信統計 |
+
+### Voice Interface (C-8)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/voice/parse` | 音声コマンド解析 |
+| `POST` | `/voice/speak` | テキスト読み上げ準備 |
+| `GET` | `/voice/settings` | 音声設定取得 |
+| `POST` | `/voice/settings` | 音声設定変更 |
+| `GET` | `/voice/stats` | 音声統計 |
+
+### Migration (A-5)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/migrate/status` | マイグレーション状態 |
+| `POST` | `/migrate/run` | マイグレーション実行 |
 
 ---
 
@@ -566,13 +865,14 @@ float精度: 全API出力を round(x, 3) で正規化
 |---|---|---|
 | Language | Python | 3.11 |
 | API Framework | FastAPI | 0.109 |
-| LLM Provider | Google Gemini | 2.5 Flash Lite |
-| LLM Fallback | Ollama | (local) |
+| LLM Provider | Google Gemini | 2.5 Flash |
+| LLM Local | Ollama (C-4) | (local) |
 | Database | PostgreSQL + pgvector | 16 |
 | Cache/Queue | Redis | 7 |
 | Container | Docker Compose | - |
 | Reverse Proxy | Nginx | - |
-| Test | pytest + pytest-asyncio | 86 tests |
+| Test | pytest + pytest-asyncio | 133 tests |
+| Voice | Web Speech API | Browser |
 
 ---
 
@@ -590,5 +890,13 @@ float精度: 全API出力を round(x, 3) で正規化
 | v6 | AI Brain (Function Calling + Tool Chain × 10) | ✅ Complete |
 | v7 | AI Organization (Departments + Agent Registry) | ✅ Complete |
 | G | Phase G: Test Bench 200q + Clone Engine | ✅ Complete |
-| A | Phase A: Emotion→Chat + Error Handling + Float fix | ✅ Complete |
-| B | Phase B: 86 Tests + Decision Full Pipeline | ✅ Complete |
+| A | Phase A: Production Hardening (CORS + Migration + Logging) | ✅ Complete |
+| B | Phase B: 86→133 Tests + Decision Full Pipeline | ✅ Complete |
+| C-1 | Dashboard UI (リアルタイムWebダッシュボード) | ✅ Complete |
+| C-2 | Multi-User Support (セッション管理) | ✅ Complete |
+| C-3 | Peer Communication (人格間コミュニケーション) | ✅ Complete |
+| C-4 | Local LLM Manager (Ollama完全統合) | ✅ Complete |
+| C-5 | Plugin System (動的プラグイン) | ✅ Complete |
+| C-6 | Emotion Behavior Adapter (感情→行動適応) | ✅ Complete |
+| C-7 | Memory Archiver (長期記憶自動整理) | ✅ Complete |
+| C-8 | Voice Interface (音声インターフェース) | ✅ Complete |
