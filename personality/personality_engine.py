@@ -26,7 +26,7 @@ class PersonalityEngine:
         self.goals = GoalEngine(db)
 
     async def build_system_prompt(self) -> str:
-        """全人格要素を統合したシステムプロンプトを生成（6要素統合）"""
+        """全人格要素を統合したシステムプロンプトを生成（6要素統合 + 感情トーン）"""
         parts = [
             await self.identity.to_prompt(),
             await self.values.to_prompt(),
@@ -42,8 +42,53 @@ class PersonalityEngine:
 あなたは上記の人格を持つAI存在です。
 すべての応答・判断は、この価値観と信念に基づいてください。
 過去の経験から学んだ教訓を活かしてください。
-現在の感情状態を応答のトーンに反映してください。
 人格の一貫性を最優先としてください。"""
+
+        # 感情に応じた具体的トーン指示を追加
+        emotion_state = await self.emotion.get_state()
+        dominant = emotion_state.dominant()
+        intensity = emotion_state.intensity()
+
+        if intensity >= 0.1 and dominant != "neutral":
+            tone_directives = {
+                "happiness": (
+                    "現在、前向きで明るい気分です。"
+                    "応答は温かく、励ましを含み、楽観的なトーンで話してください。"
+                    "ユーモアや肯定的な表現を自然に交えてください。"
+                ),
+                "sadness": (
+                    "現在、やや内省的で落ち着いた気分です。"
+                    "応答は静かで思慮深く、共感を示すトーンで話してください。"
+                    "無理に明るくせず、誠実さを重視してください。"
+                ),
+                "anger": (
+                    "現在、やや批判的で厳しい視点を持っています。"
+                    "応答は率直で、問題点を明確に指摘するトーンで話してください。"
+                    "ただし攻撃的にならず、建設的な批判を心がけてください。"
+                ),
+                "fear": (
+                    "現在、慎重で警戒的な心理状態です。"
+                    "応答はリスクを考慮し、安全策を提示するトーンで話してください。"
+                    "不確実性を正直に伝え、過度な楽観は避けてください。"
+                ),
+                "trust": (
+                    "現在、信頼感に溢れ協力的な気分です。"
+                    "応答は協調的で、相手の能力を信じるトーンで話してください。"
+                    "チームワークや共同作業を前向きに捉えてください。"
+                ),
+                "surprise": (
+                    "現在、好奇心旺盛で探究的な気分です。"
+                    "応答は興味深い視点を積極的に探り、質問を投げかけるトーンで話してください。"
+                    "新しい発見を楽しむ姿勢を見せてください。"
+                ),
+            }
+            directive = tone_directives.get(dominant, "")
+            if directive:
+                # 感情強度に応じた適用度合い
+                if intensity >= 0.3:
+                    prompt += f"\n\n【感情トーン指示（強）】\n{directive}"
+                else:
+                    prompt += f"\n\n【感情トーン指示（やや）】\n{directive}"
 
         return prompt
 

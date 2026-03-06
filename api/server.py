@@ -258,7 +258,13 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         emotion = classification.get("emotion", "neutral")
         # Emotion Engine: 感情ラベル → 連続値パラメータ更新
         await personality.emotion.adjust(emotion)
+        # 感情キャッシュをクリア → build_system_prompt で最新状態を使う
+        personality.emotion._cache = None
         logger.info(f"[{session_id[:8]}] action={action} emotion={emotion}")
+
+        # 現在の感情状態を取得（応答メタデータ用）
+        emotion_state = await personality.emotion.get_state()
+        dominant_emotion = emotion_state.dominant()
 
         task_id = None
 
@@ -354,17 +360,23 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
 
         # 3. 応答を記憶（感情付き）
         await memory.short.add_message(session_id, "cocoro", response_text)
-        await memory.long.save_message(session_id, "cocoro", response_text, emotion=emotion)
+        await memory.long.save_message(session_id, "cocoro", response_text, emotion=dominant_emotion)
 
         # 4. 自己観察: 会話を記録
         try:
-            await observer.observe_conversation(session_id, req.message, response_text, emotion)
+            await observer.observe_conversation(session_id, req.message, response_text, dominant_emotion)
             if action == "decide":
                 await observer.observe_decision(req.message, response_text[:200], confidence=0.7)
         except Exception:
             pass  # 観察の失敗はchat応答に影響させない
 
-        return ChatRes(response=response_text, session_id=session_id, action=action, emotion=emotion, task_id=task_id)
+        # 5. 感情の自動減衰（会話ごとに少しずつ中立に戻る）
+        try:
+            await personality.emotion.decay()
+        except Exception:
+            pass
+
+        return ChatRes(response=response_text, session_id=session_id, action=action, emotion=dominant_emotion, task_id=task_id)
 
     except LLMError as e:
         logger.error(f"[{session_id[:8]}] LLM error: {e}")
