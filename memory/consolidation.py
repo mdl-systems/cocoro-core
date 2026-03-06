@@ -35,10 +35,11 @@ CONSOLIDATION_PROMPT = """以下は最近の会話と行動のログです。
 class MemoryConsolidation:
     """記憶定着 — 経験を人格に反映"""
 
-    def __init__(self, memory, personality, llm):
+    def __init__(self, memory, personality, llm, growth=None):
         self.memory = memory
         self.personality = personality
         self.llm = llm
+        self.growth = growth  # GrowthTracker (シンクロ率 + 勾配調整)
 
     async def consolidate(self, session_id: str = None) -> dict:
         """最近の経験を分析し、人格に反映する"""
@@ -67,8 +68,38 @@ class MemoryConsolidation:
         # 4. 人格に反映
         applied = await self._apply(result)
 
+        # 5. 人格進化: 感情に基づく勾配調整
+        gradient_result = {}
+        if self.growth:
+            # 直近の会話からポジティブ感情の割合を判定
+            positive = await self._check_positive_emotion_ratio()
+            gradient_result = await self.growth.apply_gradient_toward_ideal(
+                positive_emotion=positive, learning_rate=0.02)
+            applied["gradient"] = gradient_result
+
+            # シンクロ率を記録
+            sync = await self.growth.record_sync_rate(trigger="consolidation")
+            applied["sync_rate"] = sync["sync_rate"]
+
         logger.info(f"Consolidation complete: {applied}")
         return {"status": "consolidated", **result, "applied": applied}
+
+    async def _check_positive_emotion_ratio(self) -> bool:
+        """直近の会話感情がポジティブ寄りかどうかを判定"""
+        try:
+            rows = await self.memory.long.db.fetch(
+                "SELECT emotion FROM conversation_log "
+                "WHERE role='user' ORDER BY created_at DESC LIMIT 20")
+            if not rows:
+                return True  # デフォルトはポジティブ
+
+            positive_emotions = {'happy', 'grateful', 'excited', 'curious'}
+            positive_count = sum(1 for r in rows if r["emotion"] in positive_emotions)
+            ratio = positive_count / len(rows)
+            logger.info(f"Positive emotion ratio: {ratio:.2f} ({positive_count}/{len(rows)})")
+            return ratio >= 0.3  # 30%以上ポジティブならTrue
+        except Exception:
+            return True
 
     def _parse(self, llm_output: str) -> dict:
         try:
@@ -116,3 +147,4 @@ class MemoryConsolidation:
             )
 
         return applied
+

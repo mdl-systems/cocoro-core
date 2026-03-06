@@ -91,8 +91,8 @@ async def lifespan(app: FastAPI):
     task_queue = TaskQueue(settings.REDIS_URL)
     event_bus = EventBus(settings.REDIS_URL)
     worker = WorkerManager(llm, router, db_pool, task_queue=task_queue, event_bus=event_bus)
-    consolidation = MemoryConsolidation(memory, personality, llm)
     growth = GrowthTracker(db_pool)
+    consolidation = MemoryConsolidation(memory, personality, llm, growth=growth)
     org = OrganizationManager(db_pool, event_bus)
     tools = ToolExecutor(memory=memory, worker=worker, org=org,
                          personality=personality, db=db_pool, router=router)
@@ -680,3 +680,132 @@ async def delete_schedule(schedule_id: str, _=Depends(verify_api_key)):
     await db_pool.execute(
         "UPDATE schedules SET status='cancelled' WHERE id=$1::uuid", schedule_id)
     return {"status": "cancelled", "id": schedule_id}
+
+
+# === Sync Rate (シンクロ率) ===
+@app.get("/growth/sync")
+async def growth_sync(_=Depends(verify_api_key)):
+    """現在のシンクロ率を算出"""
+    return await growth.calculate_sync_rate()
+
+@app.post("/growth/sync/record")
+async def growth_sync_record(_=Depends(verify_api_key)):
+    """シンクロ率を計算して履歴に保存"""
+    return await growth.record_sync_rate(trigger="manual")
+
+@app.get("/growth/sync/timeline")
+async def growth_sync_timeline(limit: int = 30, _=Depends(verify_api_key)):
+    """シンクロ率の推移"""
+    return {"timeline": await growth.get_sync_rate_timeline(limit)}
+
+
+# === Identity Import / Manifest (人格シード) ===
+class IdentityImportReq(BaseModel):
+    identity: dict | None = None  # {owner_name, profile, philosophy}
+    ideal_values: dict | None = None  # {honesty: 0.8, ...}
+    mbti: str | None = None  # "INTJ" etc.
+    source: str = "web_diagnosis"
+
+# MBTI → 理想価値観のマッピング
+MBTI_VALUE_MAP = {
+    "INTJ": {"logic": 0.9, "efficiency": 0.9, "growth": 0.8, "courage": 0.7, "honesty": 0.8, "empathy": 0.5},
+    "INTP": {"logic": 0.95, "growth": 0.85, "honesty": 0.8, "efficiency": 0.7, "empathy": 0.4, "courage": 0.6},
+    "ENTJ": {"efficiency": 0.95, "courage": 0.9, "logic": 0.85, "growth": 0.8, "honesty": 0.7, "empathy": 0.5},
+    "ENTP": {"growth": 0.9, "courage": 0.85, "logic": 0.8, "efficiency": 0.7, "honesty": 0.7, "empathy": 0.6},
+    "INFJ": {"empathy": 0.95, "honesty": 0.9, "growth": 0.85, "logic": 0.7, "courage": 0.6, "efficiency": 0.5},
+    "INFP": {"empathy": 0.95, "honesty": 0.9, "growth": 0.8, "courage": 0.5, "logic": 0.6, "efficiency": 0.4},
+    "ENFJ": {"empathy": 0.9, "courage": 0.85, "honesty": 0.8, "growth": 0.8, "efficiency": 0.7, "logic": 0.6},
+    "ENFP": {"empathy": 0.85, "growth": 0.9, "courage": 0.8, "honesty": 0.75, "efficiency": 0.5, "logic": 0.55},
+    "ISTJ": {"honesty": 0.95, "efficiency": 0.9, "logic": 0.85, "courage": 0.6, "empathy": 0.5, "growth": 0.6},
+    "ISFJ": {"empathy": 0.9, "honesty": 0.9, "efficiency": 0.8, "logic": 0.6, "courage": 0.5, "growth": 0.6},
+    "ESTJ": {"efficiency": 0.95, "honesty": 0.85, "logic": 0.8, "courage": 0.75, "empathy": 0.5, "growth": 0.6},
+    "ESFJ": {"empathy": 0.9, "honesty": 0.85, "efficiency": 0.8, "courage": 0.6, "logic": 0.55, "growth": 0.6},
+    "ISTP": {"logic": 0.9, "efficiency": 0.8, "courage": 0.75, "growth": 0.7, "honesty": 0.7, "empathy": 0.4},
+    "ISFP": {"empathy": 0.85, "honesty": 0.8, "growth": 0.75, "courage": 0.6, "logic": 0.5, "efficiency": 0.5},
+    "ESTP": {"courage": 0.9, "efficiency": 0.85, "logic": 0.7, "growth": 0.7, "honesty": 0.65, "empathy": 0.5},
+    "ESFP": {"empathy": 0.85, "courage": 0.8, "growth": 0.75, "honesty": 0.7, "efficiency": 0.5, "logic": 0.5},
+}
+
+@app.post("/identity/import")
+async def identity_import(req: IdentityImportReq, _=Depends(verify_api_key)):
+    """人格シードをインポート（MBTI or 独自診断結果）"""
+    import json as _json
+
+    # 1. 既存データのバックアップ（History保存）
+    current = await db_pool.fetchrow("SELECT * FROM identity LIMIT 1")
+    if current:
+        await db_pool.execute(
+            "INSERT INTO life_history (event_type, title, description, impact_score) "
+            "VALUES ('milestone', $1, $2, 8)",
+            f"人格シードインポート (source: {req.source})",
+            _json.dumps({"before": {"owner_name": current["owner_name"],
+                                     "profile": current["profile"],
+                                     "ideal_profile": str(current.get("ideal_profile", "{}"))
+                                    }}, ensure_ascii=False))
+
+    # 2. 理想価値観の解決
+    ideal_values = req.ideal_values
+    if not ideal_values and req.mbti:
+        mbti_upper = req.mbti.upper()
+        ideal_values = MBTI_VALUE_MAP.get(mbti_upper)
+        if not ideal_values:
+            raise HTTPException(status_code=400, detail=f"未対応のMBTI: {req.mbti}")
+
+    # 3. ideal_profile を更新
+    ideal_profile = {"ideal_values": ideal_values or {}, "source": req.source,
+                     "mbti": req.mbti}
+    await db_pool.execute(
+        "UPDATE identity SET ideal_profile=$1 WHERE id=(SELECT id FROM identity LIMIT 1)",
+        _json.dumps(ideal_profile))
+
+    # 4. Identity 更新（任意）
+    if req.identity:
+        updates = []
+        params = []
+        i = 1
+        for key in ("owner_name", "profile", "philosophy"):
+            if key in req.identity:
+                updates.append(f"{key}=${i}")
+                params.append(req.identity[key])
+                i += 1
+        if updates:
+            params.append(current["id"] if current else None)
+            await db_pool.execute(
+                f"UPDATE identity SET {','.join(updates)} WHERE id=${i}::uuid", *params)
+
+    # 5. 初回シンクロ率を計算・記録
+    sync = await growth.record_sync_rate(trigger="import")
+
+    return {"status": "imported", "source": req.source, "mbti": req.mbti,
+            "ideal_values": ideal_values, "sync_rate": sync["sync_rate"]}
+
+
+@app.get("/identity/manifest")
+async def identity_manifest(_=Depends(verify_api_key)):
+    """匿名化された人格ベクトルを公開（v10: AI文明間の比較用）"""
+    import hashlib
+    # 価値観ベクトル
+    rows = await db_pool.fetch("SELECT name, weight FROM values_system ORDER BY name")
+    value_vector = {r["name"]: round(float(r["weight"]), 3) for r in rows}
+
+    # 信念ダイジェスト
+    beliefs = await db_pool.fetch("SELECT statement, confidence FROM beliefs ORDER BY confidence DESC LIMIT 5")
+    belief_vector = [round(float(b["confidence"]), 2) for b in beliefs]
+
+    # 匿名ID生成（identityのハッシュ）
+    identity = await db_pool.fetchrow("SELECT owner_name FROM identity LIMIT 1")
+    name = identity["owner_name"] if identity else "unknown"
+    anon_id = hashlib.sha256(name.encode()).hexdigest()[:16]
+
+    # シンクロ率
+    sync = await growth.calculate_sync_rate()
+
+    return {
+        "manifest_version": "1.0",
+        "anonymous_id": anon_id,
+        "value_vector": value_vector,
+        "belief_strength": belief_vector,
+        "dimensions": len(value_vector),
+        "sync_rate": sync["sync_rate"],
+        "protocol": "cocoro-core/v10-compatible",
+    }

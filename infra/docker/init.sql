@@ -19,6 +19,7 @@ CREATE TABLE identity (
     owner_name TEXT NOT NULL,
     profile TEXT DEFAULT '',
     philosophy TEXT DEFAULT '',
+    ideal_profile JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -67,6 +68,20 @@ CREATE TABLE life_history (
     lessons_learned TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================
+-- Sync Rate History: シンクロ率の推移
+-- ============================================
+CREATE TABLE sync_rate_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    sync_rate REAL NOT NULL CHECK (sync_rate BETWEEN 0.0 AND 100.0),
+    current_vector JSONB NOT NULL,
+    ideal_vector JSONB NOT NULL,
+    delta_detail JSONB DEFAULT '{}',
+    trigger_source TEXT DEFAULT 'scheduled',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_sync_rate_created ON sync_rate_history(created_at);
 
 -- ============================================
 -- Memory: Long-Term (会話・思考・判断)
