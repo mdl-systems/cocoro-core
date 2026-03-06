@@ -47,6 +47,9 @@ from evolution.safety import SafetyLayer
 from personality.cognitive_profile import CognitiveProfileEngine
 from personality.calibration import PersonalityCalibrationEngine
 from personality.clone_engine import PersonalityCloneEngine
+from personality.emotion_adapter import EmotionBehaviorAdapter
+from memory.memory_archiver import MemoryArchiver
+from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from infra.migration import MigrationRunner
 
 class JsonFormatter(logging.Formatter):
@@ -125,11 +128,14 @@ cognitive = None
 calibration = None
 clone_engine = None
 migration_runner = None
+emotion_adapter = None
+memory_archiver = None
+plugin_registry = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -167,6 +173,14 @@ async def lifespan(app: FastAPI):
     cognitive = CognitiveProfileEngine(db_pool)
     calibration = PersonalityCalibrationEngine(db_pool, llm)
     clone_engine = PersonalityCloneEngine(db_pool)
+
+    # C-6/C-7: 感情行動アダプター + 記憶アーカイバー
+    emotion_adapter = EmotionBehaviorAdapter(personality)
+    memory_archiver = MemoryArchiver(db_pool)
+
+    # C-5: プラグインシステム
+    plugin_registry = PluginRegistry()
+    register_builtin_plugins(plugin_registry)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -1320,6 +1334,63 @@ async def migrate_run(_=Depends(verify_api_key)):
     """マイグレーション実行"""
     return await migration_runner.migrate()
 
+
+# === C-6: Emotion Behavior Adaptation ===
+@app.get("/emotion/adaptation")
+async def emotion_adaptation(_=Depends(verify_api_key)):
+    """現在の感情に基づく行動適応パラメータ"""
+    return emotion_adapter.get_full_adaptation()
+
+@app.get("/emotion/decision-threshold")
+async def emotion_decision_threshold(_=Depends(verify_api_key)):
+    """感情に基づく判断閾値"""
+    return emotion_adapter.get_decision_threshold()
+
+@app.get("/emotion/response-modifiers")
+async def emotion_response_modifiers(_=Depends(verify_api_key)):
+    """応答生成時の感情修飾パラメータ"""
+    return emotion_adapter.get_response_modifiers()
+
+
+# === C-7: Memory Archive ===
+@app.get("/memory/stats")
+async def memory_stats(_=Depends(verify_api_key)):
+    """記憶テーブルの統計"""
+    return await memory_archiver.get_stats()
+
+@app.post("/memory/archive")
+async def memory_archive(_=Depends(verify_api_key)):
+    """全テーブルのアーカイブ実行"""
+    return await memory_archiver.run_full_archive()
+
+@app.get("/memory/archive/history")
+async def memory_archive_history(_=Depends(verify_api_key)):
+    """アーカイブ履歴"""
+    return await memory_archiver.get_archive_history()
+
+
+# === C-5: Plugin System ===
+@app.get("/plugins")
+async def list_plugins(_=Depends(verify_api_key)):
+    """プラグイン一覧"""
+    return {"plugins": plugin_registry.list_plugins(), **plugin_registry.get_stats()}
+
+@app.post("/plugins/execute")
+async def execute_plugin(req: dict, _=Depends(verify_api_key)):
+    """プラグイン実行"""
+    name = req.get("name", "")
+    args = req.get("args", {})
+    return await plugin_registry.execute(name, args)
+
+@app.get("/plugins/tools")
+async def plugin_tool_definitions(_=Depends(verify_api_key)):
+    """プラグインのツール定義 (Function Calling用)"""
+    return plugin_registry.get_tool_definitions()
+
+@app.get("/plugins/stats")
+async def plugin_stats(_=Depends(verify_api_key)):
+    """プラグイン統計"""
+    return plugin_registry.get_stats()
 
 # === v7: Organization (AI組織) ===
 @app.get("/org/report")
