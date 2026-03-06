@@ -31,6 +31,7 @@ from agent.webhook.notifier import WebhookNotifier
 from agent.task_queue import TaskQueue
 from agent.event_bus import EventBus
 from agent.organization.manager import OrganizationManager
+from brain.tools.tool_registry import ToolExecutor, TOOL_DEFINITIONS
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -74,11 +75,12 @@ webhook = WebhookNotifier()
 task_queue = None
 event_bus = None
 org = None
+tools = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -92,6 +94,8 @@ async def lifespan(app: FastAPI):
     consolidation = MemoryConsolidation(memory, personality, llm)
     growth = GrowthTracker(db_pool)
     org = OrganizationManager(db_pool, event_bus)
+    tools = ToolExecutor(memory=memory, worker=worker, org=org,
+                         personality=personality, db=db_pool, router=router)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -240,10 +244,31 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
             response_text = f"学習しました: {req.message[:100]}"
 
         else:
+            # Function Calling: AIがツールを呼ぶか判断
             system_prompt = await personality.build_system_prompt()
             context = await memory.build_context(session_id, req.message)
             full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
-            response_text = await llm.generate(full_prompt, system_prompt)
+
+            fc_result = await llm.generate_with_tools(full_prompt, TOOL_DEFINITIONS, system_prompt)
+
+            if fc_result["type"] == "function_call":
+                # ツール実行
+                tool_name = fc_result["name"]
+                tool_args = fc_result["args"]
+                tool_output = await tools.execute(tool_name, tool_args)
+
+                # ツール結果をLLMに渡して最終応答を生成
+                tool_prompt = (
+                    f"{full_prompt}\n\n"
+                    f"【ツール実行結果】\n"
+                    f"ツール: {tool_name}\n"
+                    f"結果: {str(tool_output)[:1000]}\n\n"
+                    f"上記のツール結果を踏まえて、ユーザーに分かりやすく回答してください。"
+                )
+                response_text = await llm.generate(tool_prompt, system_prompt)
+                logger.info(f"[{session_id[:8]}] Tool used: {tool_name}")
+            else:
+                response_text = fc_result["content"]
 
         # 3. 応答を記憶（感情付き）
         await memory.short.add_message(session_id, "cocoro", response_text)
