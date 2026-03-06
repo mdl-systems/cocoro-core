@@ -285,6 +285,35 @@ CREATE TABLE knowledge_store (
 );
 CREATE INDEX idx_knowledge_content ON knowledge_store USING gin(content gin_trgm_ops);
 CREATE INDEX idx_knowledge_embedding ON knowledge_store USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
+-- ============================================
+-- Self Observations: 自己観察ログ (v5)
+-- ============================================
+CREATE TABLE self_observations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    obs_type TEXT NOT NULL CHECK (obs_type IN (
+        'conversation', 'decision', 'task_success', 'task_failure',
+        'emotion_change', 'learning', 'value_change', 'error')),
+    summary TEXT NOT NULL,
+    detail JSONB DEFAULT '{}',
+    impact_score INTEGER DEFAULT 5 CHECK (impact_score BETWEEN 1 AND 10),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_obs_type ON self_observations(obs_type);
+CREATE INDEX idx_obs_created ON self_observations(created_at);
+
+-- ============================================
+-- Improvement Plans: 改善計画 (v5)
+-- ============================================
+CREATE TABLE improvement_plans (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    evaluation_score REAL DEFAULT 0,
+    weak_areas JSONB DEFAULT '[]',
+    actions JSONB DEFAULT '[]',
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'executed', 'cancelled')),
+    executed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_plans_status ON improvement_plans(status);
 
 -- ============================================
 -- Goals: 目標管理 (v2/v4 要件)

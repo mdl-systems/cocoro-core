@@ -36,6 +36,9 @@ from governance.governance_engine import GovernanceManager
 from personality.setup.boot_wizard import BootWizard
 from personality.test.decision_sampling import DecisionSamplingEngine
 from personality.test.test_bench import PersonalityTestBench
+from evolution.self_observation import SelfObservationEngine
+from evolution.self_evaluation import SelfEvaluationEngine
+from evolution.improvement import ImprovementEngine
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -84,11 +87,14 @@ governance = None
 boot_wizard = None
 sampling = None
 test_bench = None
+observer = None
+evaluator = None
+improver = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -108,6 +114,9 @@ async def lifespan(app: FastAPI):
     boot_wizard = BootWizard(db_pool, llm)
     sampling = DecisionSamplingEngine(db_pool)
     test_bench = PersonalityTestBench(db_pool, llm)
+    observer = SelfObservationEngine(db_pool)
+    evaluator = SelfEvaluationEngine(db_pool)
+    improver = ImprovementEngine(db_pool, llm)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -773,6 +782,54 @@ async def bench_answer(req: BenchAnswerReq, _=Depends(verify_api_key)):
 async def bench_score(session_id: str, _=Depends(verify_api_key)):
     """一致率スコアを取得"""
     return await test_bench.get_score(session_id)
+
+
+# === Self Evolution (自己進化) ===
+@app.get("/evolution/observations")
+async def get_observations(limit: int = 50, _=Depends(verify_api_key)):
+    """自己観察ログ取得"""
+    return {"observations": await observer.get_recent(limit)}
+
+@app.get("/evolution/observations/stats")
+async def get_observation_stats(hours: int = 24, _=Depends(verify_api_key)):
+    """観察統計"""
+    return await observer.get_stats(hours)
+
+@app.get("/evolution/evaluate")
+async def self_evaluate(hours: int = 24, _=Depends(verify_api_key)):
+    """自己評価実行"""
+    return await evaluator.evaluate(hours)
+
+@app.post("/evolution/improve")
+async def generate_improvement(hours: int = 24, _=Depends(verify_api_key)):
+    """改善計画生成"""
+    evaluation = await evaluator.evaluate(hours)
+    plan = await improver.generate_plan(evaluation)
+    return plan
+
+@app.post("/evolution/improve/{plan_id}/execute")
+async def execute_improvement(plan_id: str, _=Depends(verify_api_key)):
+    """改善計画実行"""
+    return await improver.execute_plan(plan_id)
+
+@app.get("/evolution/plans")
+async def get_improvement_plans(limit: int = 10, _=Depends(verify_api_key)):
+    """改善計画一覧"""
+    plans = await improver.get_plans(limit)
+    return {"plans": plans}
+
+@app.get("/evolution/report")
+async def evolution_report(hours: int = 24, _=Depends(verify_api_key)):
+    """自己進化総合レポート"""
+    stats = await observer.get_stats(hours)
+    evaluation = await evaluator.evaluate(hours)
+    plans = await improver.get_plans(5)
+    return {
+        "observation_stats": stats,
+        "self_evaluation": evaluation,
+        "recent_plans": plans,
+        "evolution_version": "1.0",
+    }
 
 
 # === v7: Organization (AI組織) ===
