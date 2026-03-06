@@ -1,9 +1,12 @@
-"""cocoro-core — C-5/C-6/C-7 テスト"""
+"""cocoro-core — C-2/C-3/C-4/C-5/C-6/C-7 テスト"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from personality.emotion_adapter import EmotionBehaviorAdapter
+from personality.multi_user import MultiUserManager, UserSession
+from personality.peer_communication import PersonalityCommunication
+from brain.local_llm import LocalLLMManager
 
 
 # === C-5: Plugin System ===
@@ -170,3 +173,129 @@ class TestEmotionBehaviorAdapter:
         # 高強度はリスク許容度が増幅
         assert profile["risk_tolerance"] > 0.7
 
+
+# === C-2: Multi-User Manager ===
+class TestMultiUserManager:
+    def setup_method(self):
+        self.mgr = MultiUserManager(db=None)
+
+    def test_create_session(self):
+        session = self.mgr.get_or_create_session("user1", "Alice")
+        assert session.user_id == "user1"
+        assert session.display_name == "Alice"
+        assert session.message_count == 0
+
+    def test_session_reuse(self):
+        s1 = self.mgr.get_or_create_session("user1")
+        s2 = self.mgr.get_or_create_session("user1")
+        assert s1.session_id == s2.session_id
+        assert s2.message_count == 1  # touch() increments
+
+    def test_end_session(self):
+        self.mgr.get_or_create_session("user1")
+        assert self.mgr.end_session("user1") is True
+        assert self.mgr.end_session("user1") is False
+
+    def test_preferences(self):
+        self.mgr.set_preference("user1", "tone", "casual")
+        assert self.mgr.get_preference("user1", "tone") == "casual"
+        assert self.mgr.get_preference("user1", "missing", "default") == "default"
+
+    def test_stats(self):
+        self.mgr.get_or_create_session("u1")
+        self.mgr.get_or_create_session("u2")
+        stats = self.mgr.get_stats()
+        assert stats["total_sessions"] == 2
+        assert stats["active_sessions"] == 2
+
+    def test_prompt_prefix(self):
+        self.mgr.get_or_create_session("user1", "Alice")
+        self.mgr.set_preference("user1", "tone", "formal")
+        prefix = self.mgr.build_user_prompt_prefix("user1")
+        assert "Alice" in prefix
+        assert "formal" in prefix
+
+
+# === C-3: Personality Communication ===
+class TestPersonalityCommunication:
+    def setup_method(self):
+        self.comm = PersonalityCommunication("cocoro-test")
+
+    def test_register_peer(self):
+        result = self.comm.register_peer("peer1", "Cocoro-2")
+        assert result["peer_id"] == "peer1"
+        assert result["name"] == "Cocoro-2"
+
+    def test_list_peers(self):
+        self.comm.register_peer("p1", "Peer1")
+        self.comm.register_peer("p2", "Peer2")
+        peers = self.comm.list_peers()
+        assert len(peers) == 2
+
+    def test_unregister_peer(self):
+        self.comm.register_peer("p1", "Peer1")
+        assert self.comm.unregister_peer("p1") is True
+        assert self.comm.unregister_peer("p1") is False
+
+    def test_discussion_flow(self):
+        disc = self.comm.start_discussion("Should we be cautious?")
+        did = disc["discussion_id"]
+        self.comm.add_opinion(did, "cocoro-test", "Yes, safety first", "agree")
+        self.comm.add_opinion(did, "peer1", "No, be bold", "disagree")
+        result = self.comm.conclude_discussion(did, "Balance caution with action")
+        assert result["status"] == "concluded"
+        assert result["message_count"] == 2
+
+    def test_direct_message(self):
+        self.comm.register_peer("p1", "Peer1")
+        msg = self.comm.send_message("p1", "Hello!")
+        assert msg["from"] == "cocoro-test"
+        assert msg["to"] == "p1"
+
+    def test_receive_message(self):
+        msg = self.comm.receive_message("p1", "Hi there")
+        assert msg["from"] == "p1"
+        inbox = self.comm.get_inbox()
+        assert len(inbox) == 1
+
+    def test_stats(self):
+        self.comm.register_peer("p1", "Peer1")
+        self.comm.start_discussion("Topic")
+        stats = self.comm.get_stats()
+        assert stats["peer_count"] == 1
+        assert stats["total_discussions"] == 1
+
+    def test_consensus_prompt(self):
+        disc = self.comm.start_discussion("Ethics question")
+        did = disc["discussion_id"]
+        self.comm.add_opinion(did, "cocoro-test", "Safety matters")
+        prompt = self.comm.build_consensus_prompt(did)
+        assert "Ethics question" in prompt
+        assert "Safety matters" in prompt
+
+
+# === C-4: Local LLM Manager ===
+class TestLocalLLMManager:
+    def test_init(self):
+        mgr = LocalLLMManager("http://localhost:11434", "gemma2:2b")
+        assert mgr.current_model == "gemma2:2b"
+        assert mgr.base_url == "http://localhost:11434"
+
+    @pytest.mark.asyncio
+    async def test_health_check_offline(self):
+        mgr = LocalLLMManager("http://localhost:99999", "test")
+        health = await mgr.health_check()
+        assert health["healthy"] is False
+
+    @pytest.mark.asyncio
+    async def test_list_models_offline(self):
+        mgr = LocalLLMManager("http://localhost:99999", "test")
+        models = await mgr.list_models()
+        assert models == []
+
+    @pytest.mark.asyncio
+    async def test_get_stats_offline(self):
+        mgr = LocalLLMManager("http://localhost:99999", "test")
+        stats = await mgr.get_stats()
+        assert stats["provider"] == "ollama"
+        assert stats["healthy"] is False

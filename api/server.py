@@ -50,6 +50,9 @@ from personality.clone_engine import PersonalityCloneEngine
 from personality.emotion_adapter import EmotionBehaviorAdapter
 from memory.memory_archiver import MemoryArchiver
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
+from brain.local_llm import LocalLLMManager
+from personality.multi_user import MultiUserManager
+from personality.peer_communication import PersonalityCommunication
 from infra.migration import MigrationRunner
 
 class JsonFormatter(logging.Formatter):
@@ -131,11 +134,14 @@ migration_runner = None
 emotion_adapter = None
 memory_archiver = None
 plugin_registry = None
+local_llm = None
+user_manager = None
+peer_comm = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -181,6 +187,18 @@ async def lifespan(app: FastAPI):
     # C-5: プラグインシステム
     plugin_registry = PluginRegistry()
     register_builtin_plugins(plugin_registry)
+
+    # C-4: ローカルLLM管理
+    local_llm = LocalLLMManager(
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        default_model=os.getenv("OLLAMA_MODEL", "gemma2:2b"),
+    )
+
+    # C-2: マルチユーザー管理
+    user_manager = MultiUserManager(db_pool)
+
+    # C-3: 人格間コミュニケーション
+    peer_comm = PersonalityCommunication("cocoro-main")
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -1392,7 +1410,141 @@ async def plugin_stats(_=Depends(verify_api_key)):
     """プラグイン統計"""
     return plugin_registry.get_stats()
 
-# === v7: Organization (AI組織) ===
+
+# === C-4: ローカルLLM管理 ===
+@app.get("/llm/local/models")
+async def llm_local_models(_=Depends(verify_api_key)):
+    """ローカルLLMモデル一覧"""
+    return {"models": await local_llm.list_models()}
+
+@app.get("/llm/local/health")
+async def llm_local_health(_=Depends(verify_api_key)):
+    """ローカルLLMヘルスチェック"""
+    return await local_llm.health_check()
+
+@app.post("/llm/local/switch")
+async def llm_local_switch(body: dict, _=Depends(verify_api_key)):
+    """ローカルLLMモデル切り替え"""
+    return await local_llm.switch_model(body.get("model", ""))
+
+@app.get("/llm/local/info")
+async def llm_local_info(model: str = None, _=Depends(verify_api_key)):
+    """モデル詳細情報"""
+    return await local_llm.model_info(model)
+
+@app.get("/llm/local/stats")
+async def llm_local_stats(_=Depends(verify_api_key)):
+    """ローカルLLM統計"""
+    return await local_llm.get_stats()
+
+
+# === C-2: マルチユーザー管理 ===
+@app.post("/users/session")
+async def user_session(body: dict, _=Depends(verify_api_key)):
+    """セッション取得/作成"""
+    session = user_manager.get_or_create_session(
+        body.get("user_id", "default"),
+        body.get("display_name", ""),
+    )
+    return session.to_dict()
+
+@app.delete("/users/session/{user_id}")
+async def user_session_end(user_id: str, _=Depends(verify_api_key)):
+    """セッション終了"""
+    return {"ended": user_manager.end_session(user_id)}
+
+@app.get("/users/sessions")
+async def user_sessions(_=Depends(verify_api_key)):
+    """アクティブセッション一覧"""
+    return {"sessions": user_manager.list_active_sessions()}
+
+@app.post("/users/preference")
+async def user_preference(body: dict, _=Depends(verify_api_key)):
+    """ユーザー設定の保存"""
+    user_manager.set_preference(
+        body.get("user_id", "default"),
+        body.get("key", ""),
+        body.get("value", ""),
+    )
+    return {"saved": True}
+
+@app.get("/users/preferences/{user_id}")
+async def user_preferences(user_id: str, _=Depends(verify_api_key)):
+    """ユーザー設定一覧"""
+    return user_manager.get_user_preferences(user_id)
+
+@app.get("/users/stats")
+async def user_stats(_=Depends(verify_api_key)):
+    """ユーザー統計"""
+    return user_manager.get_stats()
+
+
+# === C-3: 人格間コミュニケーション ===
+@app.post("/comm/peer")
+async def comm_register_peer(body: dict, _=Depends(verify_api_key)):
+    """通信相手を登録"""
+    return peer_comm.register_peer(
+        body.get("peer_id", ""),
+        body.get("name", ""),
+        body.get("endpoint", ""),
+        body.get("personality_summary", ""),
+    )
+
+@app.get("/comm/peers")
+async def comm_list_peers(_=Depends(verify_api_key)):
+    """通信相手一覧"""
+    return {"peers": peer_comm.list_peers()}
+
+@app.post("/comm/discussion")
+async def comm_start_discussion(body: dict, _=Depends(verify_api_key)):
+    """協議セッション開始"""
+    return peer_comm.start_discussion(
+        body.get("topic", ""),
+        body.get("participants", []),
+    )
+
+@app.post("/comm/discussion/{discussion_id}/opinion")
+async def comm_add_opinion(discussion_id: str, body: dict, _=Depends(verify_api_key)):
+    """協議に意見追加"""
+    return peer_comm.add_opinion(
+        discussion_id,
+        body.get("peer_id", peer_comm.self_id),
+        body.get("content", ""),
+        body.get("stance", "neutral"),
+    )
+
+@app.post("/comm/discussion/{discussion_id}/conclude")
+async def comm_conclude(discussion_id: str, body: dict, _=Depends(verify_api_key)):
+    """協議を結論付ける"""
+    return peer_comm.conclude_discussion(
+        discussion_id, body.get("conclusion", ""),
+    )
+
+@app.get("/comm/discussions")
+async def comm_list_discussions(status: str = None, _=Depends(verify_api_key)):
+    """協議一覧"""
+    return {"discussions": peer_comm.list_discussions(status)}
+
+@app.post("/comm/message")
+async def comm_send_message(body: dict, _=Depends(verify_api_key)):
+    """ダイレクトメッセージ送信"""
+    return peer_comm.send_message(
+        body.get("to", ""),
+        body.get("content", ""),
+        body.get("type", "general"),
+    )
+
+@app.get("/comm/inbox")
+async def comm_inbox(limit: int = 20, _=Depends(verify_api_key)):
+    """受信メッセージ"""
+    return {"messages": peer_comm.get_inbox(limit)}
+
+@app.get("/comm/stats")
+async def comm_stats(_=Depends(verify_api_key)):
+    """通信統計"""
+    return peer_comm.get_stats()
+
+
 @app.get("/org/report")
 async def org_report(_=Depends(verify_api_key)):
     """組織レポート"""
