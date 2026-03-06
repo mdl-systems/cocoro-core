@@ -8,7 +8,8 @@ import uuid
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import asyncpg
 
@@ -65,7 +66,19 @@ app = FastAPI(title="cocoro-core", version="1.0.0",
               description="Personality AI Operating System", lifespan=lifespan)
 
 
-# === Health ===
+# === Auth ===
+security = HTTPBearer(auto_error=False)
+
+async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """APIキー認証。COCORO_API_KEY未設定時は認証スキップ（開発用）"""
+    api_key = settings.COCORO_API_KEY
+    if not api_key:
+        return  # キー未設定 = 認証なし（開発環境）
+    if not credentials or credentials.credentials != api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+# === Health (認証不要) ===
 @app.get("/health")
 async def health():
     llm_status = await llm.health()
@@ -84,7 +97,7 @@ class ChatRes(BaseModel):
     task_id: str | None = None
 
 @app.post("/chat", response_model=ChatRes)
-async def chat(req: ChatReq):
+async def chat(req: ChatReq, _=Depends(verify_api_key)):
     session_id = req.session_id or str(uuid.uuid4())
 
     # 1. 記憶に保存
@@ -155,7 +168,7 @@ class ThinkReq(BaseModel):
     question: str
 
 @app.post("/think")
-async def think(req: ThinkReq):
+async def think(req: ThinkReq, _=Depends(verify_api_key)):
     prompt = await reasoning.build_reasoning_prompt(req.question)
     system_prompt = await personality.build_system_prompt()
     raw = await llm.generate(prompt, system_prompt)
@@ -170,7 +183,7 @@ class DecideReq(BaseModel):
     category: str = "general"
 
 @app.post("/decide")
-async def decide(req: DecideReq):
+async def decide(req: DecideReq, _=Depends(verify_api_key)):
     prompt = await decision.build_decision_prompt(req.question, req.category)
     system_prompt = await personality.build_system_prompt()
     raw = await llm.generate(prompt, system_prompt)
@@ -181,7 +194,7 @@ async def decide(req: DecideReq):
 
 # === Identity ===
 @app.get("/identity")
-async def get_identity():
+async def get_identity(_=Depends(verify_api_key)):
     return await personality.identity.get()
 
 class IdentityUpdate(BaseModel):
@@ -190,13 +203,13 @@ class IdentityUpdate(BaseModel):
     philosophy: str | None = None
 
 @app.put("/identity")
-async def update_identity(req: IdentityUpdate):
+async def update_identity(req: IdentityUpdate, _=Depends(verify_api_key)):
     return await personality.identity.update(**req.model_dump(exclude_none=True))
 
 
 # === Values ===
 @app.get("/values")
-async def get_values():
+async def get_values(_=Depends(verify_api_key)):
     return {"values": await personality.values.get_all()}
 
 class ValueReq(BaseModel):
@@ -206,13 +219,13 @@ class ValueReq(BaseModel):
     category: str = "general"
 
 @app.post("/values")
-async def add_value(req: ValueReq):
+async def add_value(req: ValueReq, _=Depends(verify_api_key)):
     return await personality.values.add(req.name, req.description, req.weight, req.category)
 
 
 # === Beliefs ===
 @app.get("/beliefs")
-async def get_beliefs():
+async def get_beliefs(_=Depends(verify_api_key)):
     return {"beliefs": await personality.beliefs.get_all()}
 
 class BeliefReq(BaseModel):
@@ -220,17 +233,17 @@ class BeliefReq(BaseModel):
     confidence: float = 0.5
 
 @app.post("/beliefs")
-async def add_belief(req: BeliefReq):
+async def add_belief(req: BeliefReq, _=Depends(verify_api_key)):
     return await personality.beliefs.add(req.statement, req.confidence)
 
 
 # === Memory ===
 @app.get("/memory/decisions")
-async def get_decisions(category: str = None, limit: int = 20):
+async def get_decisions(category: str = None, limit: int = 20, _=Depends(verify_api_key)):
     return {"decisions": await memory.long.get_past_decisions(category, limit)}
 
 @app.get("/memory/learnings")
-async def get_learnings(limit: int = 20):
+async def get_learnings(limit: int = 20, _=Depends(verify_api_key)):
     return {"learnings": await memory.long.get_learnings(limit)}
 
 
@@ -242,7 +255,7 @@ class TaskReq(BaseModel):
     agent: str | None = None
 
 @app.post("/task")
-async def create_task(req: TaskReq):
+async def create_task(req: TaskReq, _=Depends(verify_api_key)):
     agent = req.agent or router.route(req.title, req.description)
     row = await db_pool.fetchrow(
         "INSERT INTO tasks (title, description, priority, assigned_agent) VALUES ($1,$2,$3,$4) RETURNING id,status",
@@ -250,7 +263,7 @@ async def create_task(req: TaskReq):
     return {"id": str(row["id"]), "status": row["status"], "agent": agent}
 
 @app.get("/tasks")
-async def list_tasks(status: str = None):
+async def list_tasks(status: str = None, _=Depends(verify_api_key)):
     if status:
         rows = await db_pool.fetch("SELECT * FROM tasks WHERE status=$1 ORDER BY priority,created_at", status)
     else:
@@ -260,18 +273,18 @@ async def list_tasks(status: str = None):
 
 # === Agents ===
 @app.get("/agents")
-async def list_agents():
+async def list_agents(_=Depends(verify_api_key)):
     return {"agents": router.list_agents()}
 
 # === Profile (全人格情報) ===
 @app.get("/profile")
-async def get_profile():
+async def get_profile(_=Depends(verify_api_key)):
     return await personality.get_full_profile()
 
 
 # === Consolidation (記憶定着 — GPTレビュー指摘) ===
 @app.post("/consolidate")
-async def consolidate_memories(session_id: str = None):
+async def consolidate_memories(session_id: str = None, _=Depends(verify_api_key)):
     """最近の経験を分析し、人格に反映する（記憶定着）"""
     result = await consolidation.consolidate(session_id)
     return result
@@ -279,11 +292,11 @@ async def consolidate_memories(session_id: str = None):
 
 # === Growth (成長追跡) ===
 @app.get("/growth/report")
-async def growth_report():
+async def growth_report(_=Depends(verify_api_key)):
     """人格の成長レポート"""
     return await growth.get_growth_report()
 
 @app.get("/growth/timeline")
-async def growth_timeline(limit: int = 20):
+async def growth_timeline(limit: int = 20, _=Depends(verify_api_key)):
     """人格進化のタイムライン"""
     return {"timeline": await growth.get_evolution_timeline(limit)}

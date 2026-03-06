@@ -19,6 +19,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-cocoro_secret}
       - POSTGRES_DB=cocoro_db
       - REDIS_URL=redis://cocoro-redis:6379/0
+      - COCORO_API_KEY=${COCORO_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     depends_on:
       cocoro-postgres:

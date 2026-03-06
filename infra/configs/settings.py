@@ -23,6 +23,7 @@ class Settings:
     # === API ===
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    COCORO_API_KEY: str = os.getenv("COCORO_API_KEY", "")
 
     # === Logging ===
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
