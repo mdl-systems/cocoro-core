@@ -28,6 +28,8 @@ from agent.worker_manager.manager import WorkerManager
 from memory.consolidation import MemoryConsolidation
 from personality.growth_tracker import GrowthTracker
 from agent.webhook.notifier import WebhookNotifier
+from agent.task_queue import TaskQueue
+from agent.event_bus import EventBus
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -68,19 +70,42 @@ worker = None
 consolidation = None
 growth = None
 webhook = WebhookNotifier()
+task_queue = None
+event_bus = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
     reasoning = ReasoningEngine(personality, memory)
     decision = DecisionGraph(personality, memory)
-    worker = WorkerManager(llm, router, db_pool)
+
+    # Task Queue & Event Bus
+    task_queue = TaskQueue(settings.REDIS_URL)
+    event_bus = EventBus(settings.REDIS_URL)
+    worker = WorkerManager(llm, router, db_pool, task_queue=task_queue, event_bus=event_bus)
     consolidation = MemoryConsolidation(memory, personality, llm)
     growth = GrowthTracker(db_pool)
+
+    # イベントハンドラ登録
+    async def _on_task_completed(data):
+        logger.info(f"Event: task completed — {data.get('task_id', '')[:8]}")
+        await webhook.notify("task_completed", data)
+
+    async def _on_task_failed(data):
+        logger.warning(f"Event: task failed — {data.get('task_id', '')[:8]}")
+        await webhook.notify_error("task_failed", data.get('error', 'unknown'))
+
+    event_bus.subscribe("task.completed", _on_task_completed)
+    event_bus.subscribe("task.failed", _on_task_failed)
+    await event_bus.start_listener()
+
+    # バックグラウンドWorker開始
+    await worker.start_worker(num_workers=2)
+    logger.info("Task workers: 2 started")
 
     # Consolidation定期実行スケジューラ
     scheduler_task = None
@@ -91,6 +116,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("=== cocoro-core started ===")
     yield
+    await event_bus.stop()
     if scheduler_task:
         scheduler_task.cancel()
     await db_pool.close()
@@ -375,6 +401,40 @@ async def list_tasks(status: str = None, _=Depends(verify_api_key)):
         rows = await db_pool.fetch("SELECT * FROM tasks ORDER BY priority,created_at LIMIT 50")
     return {"tasks": [dict(r) for r in rows]}
 
+@app.post("/tasks/async")
+async def create_async_task(req: TaskReq, _=Depends(verify_api_key)):
+    """タスクをキューに投入して非同期実行"""
+    try:
+        task_id = await worker.execute_async(
+            task_name=req.title,
+            description=req.description,
+            agent_type=req.agent,
+            priority=req.priority,
+        )
+        return {"task_id": task_id, "status": "queued", "agent": req.agent or "auto"}
+    except Exception as e:
+        logger.error(f"Async task error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"タスク投入エラー: {type(e).__name__}")
+
+@app.get("/tasks/{task_id}/result")
+async def get_task_result(task_id: str, _=Depends(verify_api_key)):
+    """タスク結果をポーリング取得"""
+    # Redis（キュー結果）から確認
+    result = await task_queue.get_result(task_id)
+    if result:
+        return {"task_id": task_id, **result}
+    # DBから確認
+    row = await db_pool.fetchrow("SELECT * FROM tasks WHERE id=$1::uuid", task_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="タスクが見つかりません")
+    return {"task_id": task_id, "status": row["status"], "result": row.get("result"),
+            "error": row.get("error"), "agent": row.get("assigned_agent")}
+
+@app.get("/queue/status")
+async def queue_status(_=Depends(verify_api_key)):
+    """キュー状態を確認"""
+    length = await task_queue.queue_length()
+    return {"queue_length": length, "workers": 2}
 
 # === Plan（タスク計画 + 実行） ===
 class PlanReq(BaseModel):
