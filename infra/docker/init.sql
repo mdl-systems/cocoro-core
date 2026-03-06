@@ -202,6 +202,27 @@ INSERT INTO agent_registry (agent_type, display_name, role, capabilities, depart
      (SELECT id FROM departments WHERE name='marketing'));
 
 -- ============================================
+-- Schedules: スケジュール管理
+-- ============================================
+CREATE TABLE schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    start_at TIMESTAMPTZ NOT NULL,
+    end_at TIMESTAMPTZ,
+    is_all_day BOOLEAN DEFAULT FALSE,
+    recurrence TEXT DEFAULT 'none' CHECK (recurrence IN ('none', 'daily', 'weekly', 'monthly')),
+    reminder_minutes INTEGER DEFAULT 30,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+    created_by TEXT DEFAULT 'user',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TRIGGER schedules_updated BEFORE UPDATE ON schedules
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+CREATE INDEX idx_schedule_start ON schedules(start_at);
+
+-- ============================================
 -- Vector Memory (pgvector + pg_trgm)
 -- ============================================
 CREATE TABLE knowledge_store (

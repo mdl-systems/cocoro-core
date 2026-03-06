@@ -607,3 +607,50 @@ async def delegate_task(req: DelegateReq, _=Depends(verify_api_key)):
         return {"status": "delegated", "delegation": result}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# === Schedules (スケジュール管理) ===
+class ScheduleReq(BaseModel):
+    title: str
+    description: str = ""
+    start_at: str  # ISO8601
+    end_at: str | None = None
+    reminder_minutes: int = 30
+
+@app.get("/schedules")
+async def list_schedules(days: int = 7, _=Depends(verify_api_key)):
+    """今後のスケジュール一覧"""
+    from datetime import datetime, timedelta, timezone
+    JST = timezone(timedelta(hours=9))
+    now = datetime.now(JST)
+    until = now + timedelta(days=days)
+    rows = await db_pool.fetch(
+        "SELECT * FROM schedules WHERE start_at >= $1 AND start_at <= $2 AND status='active' "
+        "ORDER BY start_at", now, until)
+    return {"schedules": [dict(r) for r in rows], "count": len(rows)}
+
+@app.post("/schedules")
+async def add_schedule(req: ScheduleReq, _=Depends(verify_api_key)):
+    """スケジュール追加"""
+    from datetime import datetime, timezone, timedelta
+    JST = timezone(timedelta(hours=9))
+    start = datetime.fromisoformat(req.start_at)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=JST)
+    end = None
+    if req.end_at:
+        end = datetime.fromisoformat(req.end_at)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=JST)
+    row = await db_pool.fetchrow(
+        "INSERT INTO schedules (title, description, start_at, end_at, reminder_minutes) "
+        "VALUES ($1,$2,$3,$4,$5) RETURNING *",
+        req.title, req.description, start, end, req.reminder_minutes)
+    return {"status": "created", "schedule": dict(row)}
+
+@app.delete("/schedules/{schedule_id}")
+async def delete_schedule(schedule_id: str, _=Depends(verify_api_key)):
+    """スケジュール削除"""
+    await db_pool.execute(
+        "UPDATE schedules SET status='cancelled' WHERE id=$1::uuid", schedule_id)
+    return {"status": "cancelled", "id": schedule_id}
