@@ -15,7 +15,7 @@ class LLMRuntime:
         self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "gemma2:2b")
         self.gemini_key = os.getenv("GEMINI_API_KEY", "")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
         self._rpm_count = 0
         self._rpm_start = time.time()
 
