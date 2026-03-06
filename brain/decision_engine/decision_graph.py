@@ -16,11 +16,20 @@ CLASSIFY_PROMPT = """以下のユーザー入力を分類してください。
 {{"action": "chat|think|decide|delegate|learn", "reason": "分類理由", "category": "general|business|technical|personal", "agent": "dev|sales|marketing|null", "priority": 5, "emotion": "neutral|happy|sad|angry|anxious|curious|excited|grateful"}}
 
 分類基準:
-- chat: 雑談・質問・日常会話
-- think: 深く考える必要がある問題
-- decide: ビジネス判断・意思決定
-- delegate: 専門AIへの作業依頼
-- learn: 新しい知識・経験の記録
+- chat: 雑談・質問・情報確認・日常会話。以下もchatに含む:
+  * 時刻・日付を聞く（「今何時？」「今日は何曜日？」）
+  * スケジュール操作（「予定を入れて」「明日の予定は？」）
+  * 組織・Agent状況の確認（「Agentの状態は？」）
+  * Web検索・調べもの（「〜を調べて」「〜って何？」）
+  * タスク一覧の確認（「最近のタスクは？」）
+  * 過去の会話の検索（「前に話した〜」）
+  * 自己紹介・人格に関する質問（「あなたは誰？」）
+- think: 深く考える必要がある複雑な問題・哲学的な問い
+- decide: 重要なビジネス判断・トレードオフのある意思決定
+- delegate: 専門AIが長時間かけて作成する成果物の依頼のみ（レポート作成、コード生成、企画書作成、分析レポートなど）
+- learn: 「覚えて」「記録して」など、明示的な学習指示
+
+重要: 迷ったらchatにしてください。delegateは「成果物を作って」という明確な依頼のみです。
 
 emotion基準:
 - ユーザーの入力から感じ取れる感情を判定"""
