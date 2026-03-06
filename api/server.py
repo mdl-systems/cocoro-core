@@ -16,7 +16,7 @@ import asyncpg
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from infra.configs.settings import settings
-from brain.llm_runtime import LLMRuntime
+from brain.llm_runtime import LLMRuntime, LLMError
 from brain.reasoning.reasoning_engine import ReasoningEngine
 from brain.decision_engine.decision_graph import DecisionGraph
 from brain.planner.planner import Planner
@@ -100,67 +100,70 @@ class ChatRes(BaseModel):
 async def chat(req: ChatReq, _=Depends(verify_api_key)):
     session_id = req.session_id or str(uuid.uuid4())
 
-    # 1. 記憶に保存
-    await memory.short.add_message(session_id, "user", req.message)
-    await memory.long.save_message(session_id, "user", req.message)
+    try:
+        # 1. 記憶に保存
+        await memory.short.add_message(session_id, "user", req.message)
+        await memory.long.save_message(session_id, "user", req.message)
 
-    # 2. 入力を分類 (chat/think/decide/delegate/learn)
-    classify_prompt = decision.build_classify_prompt(req.message)
-    raw = await llm.generate(classify_prompt)
-    classification = decision.parse_classification(raw)
-    action = classification.get("action", "chat")
-    logger.info(f"[{session_id[:8]}] action={action}")
+        # 2. 入力を分類 (chat/think/decide/delegate/learn)
+        classify_prompt = decision.build_classify_prompt(req.message)
+        raw = await llm.generate(classify_prompt)
+        classification = decision.parse_classification(raw)
+        action = classification.get("action", "chat")
+        logger.info(f"[{session_id[:8]}] action={action}")
 
-    task_id = None
+        task_id = None
 
-    if action == "think":
-        # 深い思考
-        think_prompt = await reasoning.build_reasoning_prompt(req.message)
-        system_prompt = await personality.build_system_prompt()
-        response = await llm.generate(think_prompt, system_prompt)
-        result = reasoning.parse_reasoning(response)
-        await reasoning.record_thought(req.message, result, session_id)
-        response_text = result.get("conclusion", response)
+        if action == "think":
+            think_prompt = await reasoning.build_reasoning_prompt(req.message)
+            system_prompt = await personality.build_system_prompt()
+            response = await llm.generate(think_prompt, system_prompt)
+            result = reasoning.parse_reasoning(response)
+            await reasoning.record_thought(req.message, result, session_id)
+            response_text = result.get("conclusion", response)
 
-    elif action == "decide":
-        # 意思決定
-        category = classification.get("category", "general")
-        decide_prompt = await decision.build_decision_prompt(req.message, category)
-        system_prompt = await personality.build_system_prompt()
-        response = await llm.generate(decide_prompt, system_prompt)
-        result = decision.parse_decision(response)
-        await decision.record_decision(category, req.message, result)
-        response_text = result.get("decision", response)
+        elif action == "decide":
+            category = classification.get("category", "general")
+            decide_prompt = await decision.build_decision_prompt(req.message, category)
+            system_prompt = await personality.build_system_prompt()
+            response = await llm.generate(decide_prompt, system_prompt)
+            result = decision.parse_decision(response)
+            await decision.record_decision(category, req.message, result)
+            response_text = result.get("decision", response)
 
-    elif action == "delegate":
-        # Agent実行
-        agent_type = classification.get("agent") or router.route(req.message)
-        task_name = req.message[:80]
-        row = await db_pool.fetchrow(
-            "INSERT INTO tasks (title, description, assigned_agent) VALUES ($1,$2,$3) RETURNING id",
-            task_name, req.message, agent_type)
-        task_id = str(row["id"])
-        result = await worker.execute(task_id, task_name, req.message, agent_type)
-        response_text = result.get("output", result.get("error", "実行失敗"))
+        elif action == "delegate":
+            agent_type = classification.get("agent") or router.route(req.message)
+            task_name = req.message[:80]
+            row = await db_pool.fetchrow(
+                "INSERT INTO tasks (title, description, assigned_agent) VALUES ($1,$2,$3) RETURNING id",
+                task_name, req.message, agent_type)
+            task_id = str(row["id"])
+            result = await worker.execute(task_id, task_name, req.message, agent_type)
+            response_text = result.get("output", result.get("error", "実行失敗"))
 
-    elif action == "learn":
-        # 学習記録
-        await memory.long.save_learning("conversation", req.message, classification.get("category", "general"))
-        await personality.apply_learning(req.message)
-        response_text = f"学習しました: {req.message[:100]}"
+        elif action == "learn":
+            await memory.long.save_learning("conversation", req.message, classification.get("category", "general"))
+            await personality.apply_learning(req.message)
+            response_text = f"学習しました: {req.message[:100]}"
 
-    else:
-        # 通常会話
-        system_prompt = await personality.build_system_prompt()
-        context = await memory.build_context(session_id, req.message)
-        full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
-        response_text = await llm.generate(full_prompt, system_prompt)
+        else:
+            system_prompt = await personality.build_system_prompt()
+            context = await memory.build_context(session_id, req.message)
+            full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
+            response_text = await llm.generate(full_prompt, system_prompt)
 
-    # 3. 応答を記憶
-    await memory.short.add_message(session_id, "cocoro", response_text)
-    await memory.long.save_message(session_id, "cocoro", response_text)
+        # 3. 応答を記憶
+        await memory.short.add_message(session_id, "cocoro", response_text)
+        await memory.long.save_message(session_id, "cocoro", response_text)
 
-    return ChatRes(response=response_text, session_id=session_id, action=action, task_id=task_id)
+        return ChatRes(response=response_text, session_id=session_id, action=action, task_id=task_id)
+
+    except LLMError as e:
+        logger.error(f"[{session_id[:8]}] LLM error: {e}")
+        raise HTTPException(status_code=503, detail=f"AI応答エラー: {e}")
+    except Exception as e:
+        logger.error(f"[{session_id[:8]}] Chat error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
 # === Think (思考API) ===
@@ -169,12 +172,18 @@ class ThinkReq(BaseModel):
 
 @app.post("/think")
 async def think(req: ThinkReq, _=Depends(verify_api_key)):
-    prompt = await reasoning.build_reasoning_prompt(req.question)
-    system_prompt = await personality.build_system_prompt()
-    raw = await llm.generate(prompt, system_prompt)
-    result = reasoning.parse_reasoning(raw)
-    await reasoning.record_thought(req.question, result)
-    return result
+    try:
+        prompt = await reasoning.build_reasoning_prompt(req.question)
+        system_prompt = await personality.build_system_prompt()
+        raw = await llm.generate(prompt, system_prompt)
+        result = reasoning.parse_reasoning(raw)
+        await reasoning.record_thought(req.question, result)
+        return result
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"AI応答エラー: {e}")
+    except Exception as e:
+        logger.error(f"Think error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
 # === Decide (判断API) ===
@@ -184,12 +193,18 @@ class DecideReq(BaseModel):
 
 @app.post("/decide")
 async def decide(req: DecideReq, _=Depends(verify_api_key)):
-    prompt = await decision.build_decision_prompt(req.question, req.category)
-    system_prompt = await personality.build_system_prompt()
-    raw = await llm.generate(prompt, system_prompt)
-    result = decision.parse_decision(raw)
-    await decision.record_decision(req.category, req.question, result)
-    return result
+    try:
+        prompt = await decision.build_decision_prompt(req.question, req.category)
+        system_prompt = await personality.build_system_prompt()
+        raw = await llm.generate(prompt, system_prompt)
+        result = decision.parse_decision(raw)
+        await decision.record_decision(req.category, req.question, result)
+        return result
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"AI応答エラー: {e}")
+    except Exception as e:
+        logger.error(f"Decide error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
 # === Identity ===
@@ -286,8 +301,14 @@ async def get_profile(_=Depends(verify_api_key)):
 @app.post("/consolidate")
 async def consolidate_memories(session_id: str = None, _=Depends(verify_api_key)):
     """最近の経験を分析し、人格に反映する（記憶定着）"""
-    result = await consolidation.consolidate(session_id)
-    return result
+    try:
+        result = await consolidation.consolidate(session_id)
+        return result
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"AI応答エラー: {e}")
+    except Exception as e:
+        logger.error(f"Consolidation error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
 # === Growth (成長追跡) ===
