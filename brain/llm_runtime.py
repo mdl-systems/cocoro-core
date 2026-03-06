@@ -100,3 +100,61 @@ class LLMRuntime:
             return {"provider": "gemini", "healthy": bool(self.gemini_key)}
         except Exception:
             return {"provider": self.provider, "healthy": False}
+
+    async def generate_with_tools(self, prompt: str, tools: list[dict],
+                                   system_prompt: str = "") -> dict:
+        """Gemini Function Calling — ツール定義を渡してLLMに呼び出しを判断させる
+
+        Returns:
+            {"type": "text", "content": "..."} or
+            {"type": "function_call", "name": "...", "args": {...}}
+        """
+        if self.provider != "gemini":
+            # Ollama非対応: テキスト生成にフォールバック
+            text = await self.generate(prompt, system_prompt)
+            return {"type": "text", "content": text}
+
+        self._rate_limit()
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=self.gemini_key)
+
+            # ツール定義をGemini形式に変換
+            gemini_tools = []
+            for t in tools:
+                func_decl = genai.protos.FunctionDeclaration(
+                    name=t["name"],
+                    description=t.get("description", ""),
+                    parameters=genai.protos.Schema(
+                        type=genai.protos.Type.OBJECT,
+                        properties={
+                            k: genai.protos.Schema(type=genai.protos.Type.STRING, description=v)
+                            for k, v in t.get("parameters", {}).items()
+                        },
+                    ),
+                )
+                gemini_tools.append(func_decl)
+
+            tool_config = genai.protos.Tool(function_declarations=gemini_tools)
+            model = genai.GenerativeModel(
+                self.gemini_model,
+                system_instruction=system_prompt if system_prompt else None,
+                tools=[tool_config],
+            )
+            response = model.generate_content(prompt)
+
+            # Function Callの確認
+            for part in response.parts:
+                if hasattr(part, "function_call") and part.function_call.name:
+                    fc = part.function_call
+                    args = dict(fc.args) if fc.args else {}
+                    logger.info(f"Function call: {fc.name}({args})")
+                    return {"type": "function_call", "name": fc.name, "args": args}
+
+            # テキスト応答にフォールバック
+            return {"type": "text", "content": response.text or ""}
+        except Exception as e:
+            logger.error(f"Function Calling error: {type(e).__name__}: {e}")
+            # テキスト生成にフォールバック
+            text = await self.generate(prompt, system_prompt)
+            return {"type": "text", "content": text}
