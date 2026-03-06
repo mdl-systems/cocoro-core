@@ -312,6 +312,42 @@ async def get_learnings(limit: int = 20, _=Depends(verify_api_key)):
     return {"learnings": await memory.long.get_learnings(limit)}
 
 
+# === Decision Outcome（判断の振り返り） ===
+class OutcomeReq(BaseModel):
+    outcome: str  # success, failure, unknown
+    reflection: str = ""
+
+@app.put("/memory/decisions/{decision_id}/outcome")
+async def record_outcome(decision_id: str, req: OutcomeReq, _=Depends(verify_api_key)):
+    """過去の判断に結果と振り返りを記録"""
+    try:
+        # 1. 判断を更新
+        row = await db_pool.fetchrow(
+            "UPDATE decision_log SET outcome=$1, reflection=$2 WHERE id=$3::uuid "
+            "RETURNING id, question, decision, outcome, reflection",
+            req.outcome, req.reflection, decision_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="判断が見つかりません")
+
+        # 2. 学習として自動保存
+        lesson = f"判断「{row['decision'][:60]}」の結果: {req.outcome}"
+        if req.reflection:
+            lesson += f" / 振り返り: {req.reflection[:100]}"
+        await memory.long.save_learning(
+            source="decision_reflection", lesson=lesson,
+            category="decision", importance=7 if req.outcome == "failure" else 5,
+            source_id=decision_id)
+
+        logger.info(f"Decision {decision_id[:8]} outcome={req.outcome}")
+        return {"status": "recorded", "decision": dict(row)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Outcome error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
+
+
 # === Tasks ===
 class TaskReq(BaseModel):
     title: str
@@ -334,6 +370,51 @@ async def list_tasks(status: str = None, _=Depends(verify_api_key)):
     else:
         rows = await db_pool.fetch("SELECT * FROM tasks ORDER BY priority,created_at LIMIT 50")
     return {"tasks": [dict(r) for r in rows]}
+
+
+# === Plan（タスク計画 + 実行） ===
+class PlanReq(BaseModel):
+    task: str
+    description: str = ""
+    execute: bool = False  # Trueなら計画後にそのまま実行
+
+@app.post("/plan")
+async def create_plan(req: PlanReq, _=Depends(verify_api_key)):
+    """タスクを計画に分解し、オプションで実行"""
+    try:
+        # 1. 計画を生成
+        plan_prompt = planner.build_plan_prompt(req.task, req.description)
+        system_prompt = await personality.build_system_prompt()
+        raw = await llm.generate(plan_prompt, system_prompt)
+        plan = planner.parse_plan(raw)
+
+        # 2. 実行しない場合は計画だけ返す
+        if not req.execute:
+            return {"status": "planned", "plan": plan}
+
+        # 3. 実行：推奨Agentでタスク作成
+        agent_type = plan.get("recommended_agent") or router.route(req.task)
+        row = await db_pool.fetchrow(
+            "INSERT INTO tasks (title, description, assigned_agent) VALUES ($1,$2,$3) RETURNING id",
+            req.task[:80], req.description or req.task, agent_type)
+        task_id = str(row["id"])
+
+        # 4. Agent実行
+        result = await worker.execute(task_id, req.task, req.description or req.task, agent_type)
+
+        return {
+            "status": "executed",
+            "plan": plan,
+            "task_id": task_id,
+            "agent": agent_type,
+            "result": result,
+        }
+
+    except LLMError as e:
+        raise HTTPException(status_code=503, detail=f"AI応答エラー: {e}")
+    except Exception as e:
+        logger.error(f"Plan error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
 # === Agents ===
