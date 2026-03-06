@@ -1,0 +1,65 @@
+# cocoro-core — Docker Compose
+
+services:
+  cocoro:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile
+    container_name: cocoro-core
+    ports:
+      - "8000:8000"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma2:2b}
+      - POSTGRES_HOST=cocoro-postgres
+      - POSTGRES_USER=cocoro
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-cocoro_secret}
+      - POSTGRES_DB=cocoro_db
+      - REDIS_URL=redis://cocoro-redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      cocoro-postgres:
+        condition: service_healthy
+      cocoro-redis:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 1.0
+    restart: unless-stopped
+
+  cocoro-postgres:
+    image: postgres:15-alpine
+    container_name: cocoro-postgres
+    environment:
+      - POSTGRES_USER=cocoro
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-cocoro_secret}
+      - POSTGRES_DB=cocoro_db
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U cocoro" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 512m
+    cpus: 0.5
+    restart: unless-stopped
+
+  cocoro-redis:
+    image: redis:7-alpine
+    container_name: cocoro-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 300m
+    cpus: 0.25
+    restart: unless-stopped
+
+volumes:
+  pg-data:
