@@ -142,6 +142,7 @@ class ChatRes(BaseModel):
     response: str
     session_id: str
     action: str = "chat"
+    emotion: str = "neutral"
     task_id: str | None = None
 
 @app.post("/chat", response_model=ChatRes)
@@ -151,14 +152,15 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
     try:
         # 1. 記憶に保存
         await memory.short.add_message(session_id, "user", req.message)
-        await memory.long.save_message(session_id, "user", req.message)
+        await memory.long.save_message(session_id, "user", req.message, emotion="neutral")
 
         # 2. 入力を分類 (chat/think/decide/delegate/learn)
         classify_prompt = decision.build_classify_prompt(req.message)
         raw = await llm.generate(classify_prompt)
         classification = decision.parse_classification(raw)
         action = classification.get("action", "chat")
-        logger.info(f"[{session_id[:8]}] action={action}")
+        emotion = classification.get("emotion", "neutral")
+        logger.info(f"[{session_id[:8]}] action={action} emotion={emotion}")
 
         task_id = None
 
@@ -200,11 +202,11 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
             full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
             response_text = await llm.generate(full_prompt, system_prompt)
 
-        # 3. 応答を記憶
+        # 3. 応答を記憶（感情付き）
         await memory.short.add_message(session_id, "cocoro", response_text)
-        await memory.long.save_message(session_id, "cocoro", response_text)
+        await memory.long.save_message(session_id, "cocoro", response_text, emotion=emotion)
 
-        return ChatRes(response=response_text, session_id=session_id, action=action, task_id=task_id)
+        return ChatRes(response=response_text, session_id=session_id, action=action, emotion=emotion, task_id=task_id)
 
     except LLMError as e:
         logger.error(f"[{session_id[:8]}] LLM error: {e}")

@@ -13,15 +13,15 @@ class MemoryEngine:
         self.vector = VectorMemory(db)
 
     async def build_context(self, session_id: str, query: str = "") -> str:
-        """現在の文脈を構築"""
+        """現在の文脈を構築（感情付き）"""
         parts = []
 
-        # Short-term: 直近の会話
-        messages = await self.short.get_messages(session_id, limit=5)
+        # Short-term: 直近の会話（10件に増加）
+        messages = await self.short.get_messages(session_id, limit=10)
         if messages:
             parts.append("【直近の会話】")
             for m in messages:
-                parts.append(f"{m['role']}: {m['content'][:150]}")
+                parts.append(f"{m['role']}: {m['content'][:200]}")
 
         # Long-term: 過去の判断
         decisions = await self.long.get_past_decisions(limit=3)

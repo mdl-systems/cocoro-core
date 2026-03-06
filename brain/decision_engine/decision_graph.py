@@ -13,14 +13,17 @@ CLASSIFY_PROMPT = """以下のユーザー入力を分類してください。
 {user_input}
 
 以下のJSON形式で回答:
-{{"action": "chat|think|decide|delegate|learn", "reason": "分類理由", "category": "general|business|technical|personal", "agent": "dev|sales|marketing|null", "priority": 5}}
+{{"action": "chat|think|decide|delegate|learn", "reason": "分類理由", "category": "general|business|technical|personal", "agent": "dev|sales|marketing|null", "priority": 5, "emotion": "neutral|happy|sad|angry|anxious|curious|excited|grateful"}}
 
 分類基準:
 - chat: 雑談・質問・日常会話
 - think: 深く考える必要がある問題
 - decide: ビジネス判断・意思決定
 - delegate: 専門AIへの作業依頼
-- learn: 新しい知識・経験の記録"""
+- learn: 新しい知識・経験の記録
+
+emotion基準:
+- ユーザーの入力から感じ取れる感情を判定"""
 
 DECISION_PROMPT = """以下の判断を、あなたの価値観に基づいて行ってください。
 
