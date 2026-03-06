@@ -27,15 +27,15 @@ class MetaCognitionEngine:
         """現在のAI自己認識状態"""
         # 人格パラメータ
         identity = await self.db.fetchrow(
-            "SELECT * FROM personality WHERE id='core'")
+            "SELECT * FROM identity LIMIT 1")
         values = await self.db.fetch(
             "SELECT name, weight, category FROM values_system ORDER BY weight DESC LIMIT 10")
         beliefs = await self.db.fetch(
-            "SELECT name, strength, category FROM beliefs ORDER BY strength DESC LIMIT 10")
+            "SELECT statement, confidence, source FROM beliefs ORDER BY confidence DESC LIMIT 10")
 
         # 感情状態
         emotion = await self.db.fetchrow(
-            "SELECT * FROM emotion_state WHERE id='current'")
+            "SELECT * FROM emotion_state LIMIT 1")
 
         # 最新シンクロ率
         sync = await self.db.fetchrow(
@@ -54,18 +54,18 @@ class MetaCognitionEngine:
 
         return {
             "identity": {
-                "name": identity["name"] if identity else "cocoro",
-                "version": identity.get("version", "1.0") if identity else "1.0",
-            } if identity else {"name": "cocoro", "version": "1.0"},
+                "name": identity["owner_name"] if identity else "cocoro",
+                "profile": identity["profile"] if identity else "",
+            } if identity else {"name": "cocoro", "profile": ""},
             "top_values": [{"name": v["name"], "weight": float(v["weight"])} for v in values],
-            "top_beliefs": [{"name": b["name"], "strength": float(b["strength"])} for b in beliefs],
+            "top_beliefs": [{"statement": b["statement"], "confidence": float(b["confidence"])} for b in beliefs],
             "emotion": {
-                "joy": float(emotion["joy"]) if emotion else 0.5,
+                "happiness": float(emotion["happiness"]) if emotion else 0.5,
                 "sadness": float(emotion["sadness"]) if emotion else 0.1,
-                "anger": float(emotion["anger"]) if emotion else 0.1,
+                "anger": float(emotion["anger"]) if emotion else 0.0,
                 "fear": float(emotion["fear"]) if emotion else 0.1,
-                "surprise": float(emotion["surprise"]) if emotion else 0.1,
-                "trust": float(emotion["trust"]) if emotion else 0.5,
+                "surprise": float(emotion["surprise"]) if emotion else 0.2,
+                "trust": float(emotion["trust"]) if emotion else 0.6,
             } if emotion else {},
             "sync_rate": float(sync["sync_rate"]) if sync else None,
             "behavior_pattern": {r["obs_type"]: r["cnt"] for r in recent_obs},
@@ -112,7 +112,7 @@ class MetaCognitionEngine:
                 # DBに保存
                 await self.db.execute(
                     "INSERT INTO life_history (event_type, title, description, impact_score) "
-                    "VALUES ('strategy', $1, $2, 7)",
+                    "VALUES ('learning', $1, $2, 7)",
                     strategy.get("objective", "戦略立案")[:100],
                     json.dumps(strategy, ensure_ascii=False)[:2000])
                 return strategy

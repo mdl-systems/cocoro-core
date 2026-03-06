@@ -32,7 +32,7 @@ class ValueScoringEngine:
         values = await self.db.fetch(
             "SELECT name, weight, description FROM values_system ORDER BY weight DESC")
         beliefs = await self.db.fetch(
-            "SELECT name, strength, description FROM beliefs ORDER BY strength DESC")
+            "SELECT statement, confidence FROM beliefs ORDER BY confidence DESC")
 
         if not values and not beliefs:
             return {"total_score": 1.0, "detail": "No values/beliefs defined"}
@@ -48,7 +48,7 @@ class ValueScoringEngine:
         values = await self.db.fetch(
             "SELECT name, weight, description FROM values_system ORDER BY weight DESC")
         beliefs = await self.db.fetch(
-            "SELECT name, strength, description FROM beliefs ORDER BY strength DESC")
+            "SELECT statement, confidence FROM beliefs ORDER BY confidence DESC")
 
         if not options:
             return {"error": "No options provided"}
@@ -116,7 +116,7 @@ class ValueScoringEngine:
             f"- {v['name']} (重み: {v['weight']:.2f}): {v.get('description', '')}"
             for v in values[:8])
         beliefs_text = "\n".join(
-            f"- {b['name']} (強度: {b['strength']:.2f}): {b.get('description', '')}"
+            f"- {b['statement']} (強度: {b['confidence']:.2f})"
             for b in beliefs[:8])
 
         prompt = f"""以下の応答がAI人格の価値観・信念とどれだけ整合しているか評価してください。
