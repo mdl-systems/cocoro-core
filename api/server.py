@@ -462,6 +462,12 @@ async def decide(req: DecideReq, _=Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
+@app.get("/decide/pipeline")
+async def decide_pipeline_info(_=Depends(verify_api_key)):
+    """Decision Graph パイプライン情報"""
+    return decision.get_pipeline_info()
+
+
 # === Identity ===
 @app.get("/identity")
 async def get_identity(_=Depends(verify_api_key)):

@@ -61,11 +61,26 @@ class TestDecisionGraph:
         result = self.dg.parse_decision(output)
         assert result["decision"] == "承認する"
         assert result["confidence"] == 0.85
+        # フルパイプライン追加フィールドのデフォルト値
+        assert "memory_influence" in result
+        assert "emotion_influence" in result
+        assert "alternatives" in result
 
     def test_parse_decision_invalid(self):
         result = self.dg.parse_decision("解析できません")
         assert "decision" in result
         assert result["confidence"] == 0.5
+        assert result["alternatives"] == []
+
+    def test_pipeline_info(self):
+        info = self.dg.get_pipeline_info()
+        assert info["pipeline"] == "Memory → Value → Emotion → Decision"
+        assert len(info["stages"]) == 4
+        stage_names = [s["name"] for s in info["stages"]]
+        assert "Memory" in stage_names
+        assert "Value" in stage_names
+        assert "Emotion" in stage_names
+        assert "Decision" in stage_names
 
 
 # === ReasoningEngine ===
