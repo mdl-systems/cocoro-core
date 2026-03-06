@@ -1,6 +1,6 @@
 """cocoro-core — Personality Engine
 人格の一貫性を保証するコア統合エンジン。
-Identity + Values + Beliefs + History + Emotion を統合してシステムプロンプトを生成。
+Identity + Values + Beliefs + History + Emotion + Goals を統合してシステムプロンプトを生成。
 """
 import logging
 
@@ -9,12 +9,13 @@ from personality.values.value_system import ValueSystem
 from personality.beliefs.belief_system import BeliefSystem
 from personality.history.life_history import LifeHistory
 from personality.emotion.emotion_engine import EmotionEngine
+from personality.goals.goal_engine import GoalEngine
 
 logger = logging.getLogger("cocoro.personality")
 
 
 class PersonalityEngine:
-    """人格統合エンジン — cocoro-coreの心臓部（5要素統合）"""
+    """人格統合エンジン — cocoro-coreの心臓部（6要素統合）"""
 
     def __init__(self, db):
         self.identity = IdentityEngine(db)
@@ -22,15 +23,17 @@ class PersonalityEngine:
         self.beliefs = BeliefSystem(db)
         self.history = LifeHistory(db)
         self.emotion = EmotionEngine(db)
+        self.goals = GoalEngine(db)
 
     async def build_system_prompt(self) -> str:
-        """全人格要素を統合したシステムプロンプトを生成（感情込み）"""
+        """全人格要素を統合したシステムプロンプトを生成（6要素統合）"""
         parts = [
             await self.identity.to_prompt(),
             await self.values.to_prompt(),
             await self.beliefs.to_prompt(),
             await self.history.to_prompt(),
             await self.emotion.to_prompt(),
+            await self.goals.to_prompt(),
         ]
 
         prompt = "\n\n".join(p for p in parts if p)
@@ -53,6 +56,7 @@ class PersonalityEngine:
             "beliefs": await self.beliefs.get_all(),
             "history": await self.history.get_recent(10),
             "emotion": emotion_state.to_dict(),
+            "goals": await self.goals.get_active(),
         }
 
     async def apply_learning(self, lesson: str, affected_value: str = None,

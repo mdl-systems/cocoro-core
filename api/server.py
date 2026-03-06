@@ -32,6 +32,7 @@ from agent.task_queue import TaskQueue
 from agent.event_bus import EventBus
 from agent.organization.manager import OrganizationManager
 from brain.tools.tool_registry import ToolExecutor, TOOL_DEFINITIONS
+from governance.governance_engine import GovernanceManager
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -76,11 +77,12 @@ task_queue = None
 event_bus = None
 org = None
 tools = None
+governance = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -96,6 +98,7 @@ async def lifespan(app: FastAPI):
     org = OrganizationManager(db_pool, event_bus)
     tools = ToolExecutor(memory=memory, worker=worker, org=org,
                          personality=personality, db=db_pool, router=router)
+    governance = GovernanceManager(db_pool)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -200,6 +203,13 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         # 1. 記憶に保存
         await memory.short.add_message(session_id, "user", req.message)
         await memory.long.save_message(session_id, "user", req.message, emotion="neutral")
+
+        # Governance: 入力の倫理チェック
+        gov_check = await governance.check_input(req.message)
+        if not gov_check.passed:
+            logger.warning(f"[{session_id[:8]}] Governance blocked input: {gov_check.reason}")
+            return ChatRes(response=gov_check.suggestion or "そのリクエストにはお応えできません。",
+                           session_id=session_id, action="blocked", emotion="neutral", task_id=None)
 
         # 2. 入力を分類 (chat/think/decide/delegate/learn)
         classify_prompt = decision.build_classify_prompt(req.message)
@@ -618,6 +628,71 @@ async def emotion_adjust(req: EmotionAdjustReq, _=Depends(verify_api_key)):
 async def emotion_decay(_=Depends(verify_api_key)):
     """感情を中立に向かって減衰させる"""
     return await personality.emotion.decay()
+
+
+# === Goals (目標管理) ===
+@app.get("/goals")
+async def list_goals(_=Depends(verify_api_key)):
+    """全目標を取得"""
+    return {"goals": await personality.goals.get_all()}
+
+class GoalReq(BaseModel):
+    title: str
+    description: str = ""
+    goal_type: str = "short_term"
+    priority: int = 5
+
+@app.post("/goals")
+async def add_goal(req: GoalReq, _=Depends(verify_api_key)):
+    """目標を追加"""
+    goal = await personality.goals.add(req.title, req.description, req.goal_type, req.priority)
+    return {"status": "created", "goal": goal}
+
+class GoalUpdateReq(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    goal_type: str | None = None
+    priority: int | None = None
+    status: str | None = None
+
+@app.put("/goals/{goal_id}")
+async def update_goal(goal_id: str, req: GoalUpdateReq, _=Depends(verify_api_key)):
+    """目標を更新"""
+    goal = await personality.goals.update(goal_id, **req.model_dump(exclude_none=True))
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"status": "updated", "goal": goal}
+
+@app.delete("/goals/{goal_id}")
+async def delete_goal(goal_id: str, _=Depends(verify_api_key)):
+    """目標を削除"""
+    deleted = await personality.goals.delete(goal_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"status": "deleted"}
+
+
+# === Governance (ガバナンス) ===
+@app.get("/governance/report")
+async def governance_report(_=Depends(verify_api_key)):
+    """ガバナンス総合レポート"""
+    return await governance.get_full_report()
+
+@app.get("/governance/log")
+async def governance_log(limit: int = 20, _=Depends(verify_api_key)):
+    """ガバナンスログ"""
+    rows = await db_pool.fetch(
+        "SELECT * FROM governance_log ORDER BY created_at DESC LIMIT $1", limit)
+    return {"log": [dict(r) for r in rows]}
+
+class GovernanceCheckReq(BaseModel):
+    text: str
+
+@app.post("/governance/check")
+async def governance_check(req: GovernanceCheckReq, _=Depends(verify_api_key)):
+    """テキストの倫理チェック"""
+    result = await governance.check_input(req.text)
+    return result.to_dict()
 
 
 # === v7: Organization (AI組織) ===

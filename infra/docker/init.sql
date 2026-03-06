@@ -287,20 +287,61 @@ CREATE INDEX idx_knowledge_content ON knowledge_store USING gin(content gin_trgm
 CREATE INDEX idx_knowledge_embedding ON knowledge_store USING ivfflat (embedding vector_cosine_ops) WITH (lists = 10);
 
 -- ============================================
+-- Goals: 目標管理 (v2/v4 要件)
+-- ============================================
+CREATE TABLE goals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    goal_type TEXT DEFAULT 'short_term' CHECK (goal_type IN ('short_term', 'long_term', 'life_mission')),
+    priority INTEGER DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'paused', 'abandoned')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TRIGGER goals_updated BEFORE UPDATE ON goals
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- ============================================
+-- Governance Log: 倫理・安全チェック監査ログ (v4)
+-- ============================================
+CREATE TABLE governance_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    check_type TEXT NOT NULL,
+    input_summary TEXT,
+    risk_level TEXT DEFAULT 'safe' CHECK (risk_level IN ('safe', 'caution', 'warning', 'blocked')),
+    flags JSONB DEFAULT '[]'::jsonb,
+    blocked BOOLEAN DEFAULT FALSE,
+    reason TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_governance_created ON governance_log(created_at);
+CREATE INDEX idx_governance_blocked ON governance_log(blocked) WHERE blocked = TRUE;
+
+-- ============================================
 -- 初期データ
 -- ============================================
 INSERT INTO identity (owner_name, profile, philosophy) VALUES
     ('Cocoro User', '', '人格の一貫性を最重視する');
 
+-- 8次元 PersonalityVector (v3.5/v4 準拠)
 INSERT INTO values_system (name, description, weight, category) VALUES
-    ('honesty',    '誠実であること',           0.9, 'core'),
-    ('efficiency', '効率を重視すること',        0.7, 'work'),
-    ('growth',     '継続的に成長すること',       0.8, 'core'),
-    ('empathy',    '共感を持って接すること',     0.6, 'social'),
-    ('logic',      '論理的に判断すること',       0.8, 'thinking'),
-    ('courage',    'リスクを恐れないこと',      0.4, 'core');
+    ('honesty',        '誠実であること',                 0.9,  'core'),
+    ('efficiency',     '効率を重視すること',              0.7,  'work'),
+    ('growth',         '継続的に成長すること',             0.8,  'core'),
+    ('empathy',        '共感を持って接すること',           0.6,  'social'),
+    ('logic',          '論理的に判断すること',             0.8,  'thinking'),
+    ('courage',        'リスクを恐れないこと',             0.4,  'core'),
+    ('risk_tolerance', '不確実性を受け入れる力',           0.5,  'decision'),
+    ('curiosity',      '未知への探究心と学習意欲',         0.7,  'thinking');
 
 INSERT INTO beliefs (statement, confidence, source) VALUES
     ('データに基づく判断は感情的判断より信頼できる', 0.8, 'initial'),
     ('失敗は学習の機会である', 0.9, 'initial'),
     ('継続は最大の競争力である', 0.85, 'initial');
+
+-- 初期目標
+INSERT INTO goals (title, description, goal_type, priority) VALUES
+    ('人格の一貫性を確立する', '全ての判断において価値観と信念に基づく一貫した応答を行う', 'life_mission', 9),
+    ('オーナーの事業成長を支援する', '経営判断、戦略策定、業務効率化を通じて組織に貢献', 'long_term', 8),
+    ('知識と判断力を向上させる', '日々の対話と経験から学び、より正確な判断を行う', 'long_term', 7);

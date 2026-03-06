@@ -15,14 +15,16 @@ logger = logging.getLogger("cocoro.growth")
 
 JST = timezone(timedelta(hours=9))
 
-# デフォルト理想ベクトル（初期状態 / 未設定時）
+# デフォルト理想ベクトル（初期状態 / 未設定時）— 8次元 (v3.5/v4)
 DEFAULT_IDEAL_VALUES = {
-    "honesty":    0.8,
-    "efficiency": 0.7,
-    "growth":     0.9,
-    "empathy":    0.8,
-    "logic":      0.7,
-    "courage":    0.6,
+    "honesty":        0.8,
+    "efficiency":     0.7,
+    "growth":         0.9,
+    "empathy":        0.8,
+    "logic":          0.7,
+    "courage":        0.6,
+    "risk_tolerance": 0.5,
+    "curiosity":      0.8,
 }
 
 # イエスマン防止: シンクロ率のソフトキャップ
