@@ -27,6 +27,7 @@ from agent.task_router.router import TaskRouter
 from agent.worker_manager.manager import WorkerManager
 from memory.consolidation import MemoryConsolidation
 from personality.growth_tracker import GrowthTracker
+from agent.webhook.notifier import WebhookNotifier
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -66,6 +67,7 @@ router = TaskRouter()
 worker = None
 consolidation = None
 growth = None
+webhook = WebhookNotifier()
 
 
 @asynccontextmanager
@@ -104,10 +106,12 @@ async def _consolidation_scheduler(interval_hours: int):
             logger.info("[Scheduler] Consolidation starting...")
             result = await consolidation.consolidate()
             logger.info(f"[Scheduler] Consolidation done: {result.get('status', 'unknown')}")
+            await webhook.notify_consolidation(result)
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"[Scheduler] Consolidation failed: {e}")
+            await webhook.notify_error("consolidation", str(e))
 
 
 app = FastAPI(title="cocoro-core", version="1.0.0",

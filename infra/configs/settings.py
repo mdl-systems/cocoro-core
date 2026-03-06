@@ -31,6 +31,9 @@ class Settings:
     # === Scheduler ===
     CONSOLIDATION_INTERVAL_HOURS: int = int(os.getenv("CONSOLIDATION_INTERVAL_HOURS", "6"))
 
+    # === Webhook ===
+    WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")  # Discord/Slack webhook
+
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
