@@ -84,6 +84,40 @@ CREATE TABLE sync_rate_history (
 CREATE INDEX idx_sync_rate_created ON sync_rate_history(created_at);
 
 -- ============================================
+-- Emotion State: 感情の連続値状態
+-- ============================================
+CREATE TABLE emotion_state (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    happiness REAL DEFAULT 0.5 CHECK (happiness BETWEEN 0.0 AND 1.0),
+    sadness REAL DEFAULT 0.1 CHECK (sadness BETWEEN 0.0 AND 1.0),
+    anger REAL DEFAULT 0.0 CHECK (anger BETWEEN 0.0 AND 1.0),
+    fear REAL DEFAULT 0.1 CHECK (fear BETWEEN 0.0 AND 1.0),
+    trust REAL DEFAULT 0.6 CHECK (trust BETWEEN 0.0 AND 1.0),
+    surprise REAL DEFAULT 0.2 CHECK (surprise BETWEEN 0.0 AND 1.0),
+    dominant_emotion TEXT DEFAULT 'neutral',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TRIGGER emotion_state_updated BEFORE UPDATE ON emotion_state
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- 初期感情状態
+INSERT INTO emotion_state (happiness, sadness, anger, fear, trust, surprise, dominant_emotion)
+VALUES (0.5, 0.1, 0.0, 0.1, 0.6, 0.2, 'neutral');
+
+-- ============================================
+-- Emotion History: 感情変化の履歴
+-- ============================================
+CREATE TABLE emotion_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trigger_event TEXT NOT NULL,
+    before_state JSONB NOT NULL,
+    after_state JSONB NOT NULL,
+    adjustments JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_emotion_history_created ON emotion_history(created_at);
+
+-- ============================================
 -- Memory: Long-Term (会話・思考・判断)
 -- ============================================
 CREATE TABLE conversation_log (

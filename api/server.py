@@ -207,6 +207,8 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         classification = decision.parse_classification(raw)
         action = classification.get("action", "chat")
         emotion = classification.get("emotion", "neutral")
+        # Emotion Engine: 感情ラベル → 連続値パラメータ更新
+        await personality.emotion.adjust(emotion)
         logger.info(f"[{session_id[:8]}] action={action} emotion={emotion}")
 
         task_id = None
@@ -579,12 +581,43 @@ async def consolidate_memories(session_id: str = None, _=Depends(verify_api_key)
 @app.get("/growth/report")
 async def growth_report(_=Depends(verify_api_key)):
     """人格の成長レポート"""
-    return await growth.get_growth_report()
+    report = await growth.get_growth_report()
+    # 感情状態も成長レポートに含める
+    emotion_state = await personality.emotion.get_state()
+    report["emotion"] = emotion_state.to_dict()
+    return report
 
 @app.get("/growth/timeline")
 async def growth_timeline(limit: int = 20, _=Depends(verify_api_key)):
     """人格進化のタイムライン"""
     return {"timeline": await growth.get_evolution_timeline(limit)}
+
+
+# === Emotion (感情エンジン) ===
+@app.get("/emotion/state")
+async def emotion_state(_=Depends(verify_api_key)):
+    """現在の感情状態を取得"""
+    state = await personality.emotion.get_state()
+    return state.to_dict()
+
+@app.get("/emotion/history")
+async def emotion_history(limit: int = 20, _=Depends(verify_api_key)):
+    """感情変化の履歴"""
+    return {"history": await personality.emotion.get_history(limit)}
+
+class EmotionAdjustReq(BaseModel):
+    emotion_label: str
+    intensity: float = 1.0
+
+@app.post("/emotion/adjust")
+async def emotion_adjust(req: EmotionAdjustReq, _=Depends(verify_api_key)):
+    """手動で感情を調整"""
+    return await personality.emotion.adjust(req.emotion_label, req.intensity)
+
+@app.post("/emotion/decay")
+async def emotion_decay(_=Depends(verify_api_key)):
+    """感情を中立に向かって減衰させる"""
+    return await personality.emotion.decay()
 
 
 # === v7: Organization (AI組織) ===
