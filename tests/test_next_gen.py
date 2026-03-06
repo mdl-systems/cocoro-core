@@ -69,21 +69,27 @@ class TestPluginRegistry:
 
 # === C-6: Emotion Behavior Adapter ===
 class MockEmotionState:
-    def __init__(self, dominant="neutral", intensity=0.0, **kwargs):
-        self.dominant = dominant
-        self.intensity = intensity
+    def __init__(self, _dominant="neutral", _intensity=0.0, **kwargs):
+        self._dominant = _dominant
+        self._intensity = _intensity
         for k, v in kwargs.items():
             setattr(self, k, v)
 
+    def dominant(self):
+        return self._dominant
+
+    def intensity(self):
+        return self._intensity
+
     def to_dict(self):
-        return {"dominant": self.dominant, "intensity": round(self.intensity, 3)}
+        return {"dominant": self._dominant, "intensity": round(self._intensity, 3)}
 
 
 class MockEmotion:
     def __init__(self, state):
         self._state = state
 
-    def get_state(self):
+    async def get_state(self):
         return self._state
 
 
@@ -92,64 +98,75 @@ class MockPersonality:
         self.emotion = MockEmotion(emotion_state)
 
 
+import pytest
+
 class TestEmotionBehaviorAdapter:
-    def test_neutral_profile(self):
+    @pytest.mark.asyncio
+    async def test_neutral_profile(self):
         state = MockEmotionState("neutral", 0.0)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        profile = adapter.get_behavior_profile(state)
+        profile = await adapter.get_behavior_profile(state)
         assert profile["response_tone"] == "balanced"
         assert profile["dominant_emotion"] == "neutral"
 
-    def test_happiness_profile(self):
+    @pytest.mark.asyncio
+    async def test_happiness_profile(self):
         state = MockEmotionState("happiness", 0.5)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        profile = adapter.get_behavior_profile(state)
+        profile = await adapter.get_behavior_profile(state)
         assert profile["response_tone"] == "positive"
         assert profile["risk_tolerance"] > 0.4
 
-    def test_fear_profile(self):
+    @pytest.mark.asyncio
+    async def test_fear_profile(self):
         state = MockEmotionState("fear", 0.5)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        profile = adapter.get_behavior_profile(state)
+        profile = await adapter.get_behavior_profile(state)
         assert profile["response_tone"] == "cautious"
         assert profile["risk_tolerance"] < 0.3
 
-    def test_decision_threshold(self):
+    @pytest.mark.asyncio
+    async def test_decision_threshold(self):
         state = MockEmotionState("anger", 0.6)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        threshold = adapter.get_decision_threshold(state)
+        threshold = await adapter.get_decision_threshold(state)
         assert "confidence_required" in threshold
         assert "risk_tolerance" in threshold
         assert "speed" in threshold
 
-    def test_response_modifiers(self):
+    @pytest.mark.asyncio
+    async def test_response_modifiers(self):
         state = MockEmotionState("sadness", 0.4)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        mods = adapter.get_response_modifiers(state)
+        mods = await adapter.get_response_modifiers(state)
         assert mods["tone"] == "gentle"
         assert "tone_directive" in mods
         assert "temperature_modifier" in mods
 
-    def test_full_adaptation(self):
+    @pytest.mark.asyncio
+    async def test_full_adaptation(self):
         state = MockEmotionState("surprise", 0.7)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        full = adapter.get_full_adaptation(state)
+        full = await adapter.get_full_adaptation(state)
         assert "behavior" in full
         assert "decision" in full
         assert "response" in full
         assert "emotion_state" in full
 
-    def test_low_intensity_blending(self):
+    @pytest.mark.asyncio
+    async def test_low_intensity_blending(self):
         state = MockEmotionState("happiness", 0.05)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        profile = adapter.get_behavior_profile(state)
+        profile = await adapter.get_behavior_profile(state)
         # 低強度はニュートラルに近づく
         neutral_risk = 0.4
         assert abs(profile["risk_tolerance"] - neutral_risk) < 0.2
 
-    def test_high_intensity_amplification(self):
+    @pytest.mark.asyncio
+    async def test_high_intensity_amplification(self):
         state = MockEmotionState("anger", 0.9)
         adapter = EmotionBehaviorAdapter(MockPersonality(state))
-        profile = adapter.get_behavior_profile(state)
+        profile = await adapter.get_behavior_profile(state)
         # 高強度はリスク許容度が増幅
         assert profile["risk_tolerance"] > 0.7
+

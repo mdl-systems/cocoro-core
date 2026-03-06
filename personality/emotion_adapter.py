@@ -80,13 +80,13 @@ class EmotionBehaviorAdapter:
     def __init__(self, personality_engine):
         self.personality = personality_engine
 
-    def get_behavior_profile(self, emotion_state=None) -> dict:
+    async def get_behavior_profile(self, emotion_state=None) -> dict:
         """現在の感情状態から行動プロファイルを取得"""
         if emotion_state is None:
-            emotion_state = self.personality.emotion.get_state()
+            emotion_state = await self.personality.emotion.get_state()
 
-        dominant = emotion_state.dominant
-        intensity = emotion_state.intensity
+        dominant = emotion_state.dominant()
+        intensity = emotion_state.intensity()
         base_profile = self.BEHAVIOR_PROFILES.get(
             dominant, self.BEHAVIOR_PROFILES["neutral"]
         ).copy()
@@ -110,9 +110,9 @@ class EmotionBehaviorAdapter:
 
         return base_profile
 
-    def get_decision_threshold(self, emotion_state=None) -> dict:
+    async def get_decision_threshold(self, emotion_state=None) -> dict:
         """感情に基づく判断閾値を返す"""
-        profile = self.get_behavior_profile(emotion_state)
+        profile = await self.get_behavior_profile(emotion_state)
 
         # リスク許容度から判断閾値を計算
         risk = profile["risk_tolerance"]
@@ -124,9 +124,9 @@ class EmotionBehaviorAdapter:
             "dominant_emotion": profile["dominant_emotion"],
         }
 
-    def get_response_modifiers(self, emotion_state=None) -> dict:
+    async def get_response_modifiers(self, emotion_state=None) -> dict:
         """応答生成時の修飾パラメータを返す"""
-        profile = self.get_behavior_profile(emotion_state)
+        profile = await self.get_behavior_profile(emotion_state)
 
         return {
             "tone": profile["response_tone"],
@@ -138,14 +138,14 @@ class EmotionBehaviorAdapter:
             "intensity": profile["intensity"],
         }
 
-    def get_full_adaptation(self, emotion_state=None) -> dict:
+    async def get_full_adaptation(self, emotion_state=None) -> dict:
         """全適応パラメータをまとめて返す"""
         if emotion_state is None:
-            emotion_state = self.personality.emotion.get_state()
+            emotion_state = await self.personality.emotion.get_state()
 
         return {
-            "behavior": self.get_behavior_profile(emotion_state),
-            "decision": self.get_decision_threshold(emotion_state),
-            "response": self.get_response_modifiers(emotion_state),
+            "behavior": await self.get_behavior_profile(emotion_state),
+            "decision": await self.get_decision_threshold(emotion_state),
+            "response": await self.get_response_modifiers(emotion_state),
             "emotion_state": emotion_state.to_dict(),
         }

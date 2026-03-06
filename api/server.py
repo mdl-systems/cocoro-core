@@ -1339,17 +1339,17 @@ async def migrate_run(_=Depends(verify_api_key)):
 @app.get("/emotion/adaptation")
 async def emotion_adaptation(_=Depends(verify_api_key)):
     """現在の感情に基づく行動適応パラメータ"""
-    return emotion_adapter.get_full_adaptation()
+    return await emotion_adapter.get_full_adaptation()
 
 @app.get("/emotion/decision-threshold")
 async def emotion_decision_threshold(_=Depends(verify_api_key)):
     """感情に基づく判断閾値"""
-    return emotion_adapter.get_decision_threshold()
+    return await emotion_adapter.get_decision_threshold()
 
 @app.get("/emotion/response-modifiers")
 async def emotion_response_modifiers(_=Depends(verify_api_key)):
     """応答生成時の感情修飾パラメータ"""
-    return emotion_adapter.get_response_modifiers()
+    return await emotion_adapter.get_response_modifiers()
 
 
 # === C-7: Memory Archive ===
