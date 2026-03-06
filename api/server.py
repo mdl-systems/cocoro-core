@@ -244,31 +244,57 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
             response_text = f"学習しました: {req.message[:100]}"
 
         else:
-            # Function Calling: AIがツールを呼ぶか判断
+            # Function Calling: マルチツール連鎖対応（最大3回）
             system_prompt = await personality.build_system_prompt()
             context = await memory.build_context(session_id, req.message)
             full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
 
-            fc_result = await llm.generate_with_tools(full_prompt, TOOL_DEFINITIONS, system_prompt)
+            MAX_TOOL_CALLS = 3
+            tool_history = []
+            current_prompt = full_prompt
 
-            if fc_result["type"] == "function_call":
+            for step in range(MAX_TOOL_CALLS):
+                fc_result = await llm.generate_with_tools(current_prompt, TOOL_DEFINITIONS, system_prompt)
+
+                if fc_result["type"] != "function_call":
+                    # テキスト応答 → ループ終了
+                    response_text = fc_result["content"]
+                    break
+
                 # ツール実行
                 tool_name = fc_result["name"]
                 tool_args = fc_result["args"]
                 tool_output = await tools.execute(tool_name, tool_args)
+                tool_history.append({"tool": tool_name, "args": tool_args, "result": tool_output})
+                logger.info(f"[{session_id[:8]}] Tool chain step {step+1}: {tool_name}")
 
-                # ツール結果をLLMに渡して最終応答を生成
-                tool_prompt = (
-                    f"{full_prompt}\n\n"
-                    f"【ツール実行結果】\n"
-                    f"ツール: {tool_name}\n"
-                    f"結果: {str(tool_output)[:1000]}\n\n"
-                    f"上記のツール結果を踏まえて、ユーザーに分かりやすく回答してください。"
+                # ツール結果を蓄積してプロンプト更新
+                history_text = "\n".join(
+                    f"[ツール{i+1}] {h['tool']}: {str(h['result'])[:500]}"
+                    for i, h in enumerate(tool_history)
                 )
-                response_text = await llm.generate(tool_prompt, system_prompt)
-                logger.info(f"[{session_id[:8]}] Tool used: {tool_name}")
+                current_prompt = (
+                    f"{full_prompt}\n\n"
+                    f"【実行済みツール結果】\n{history_text}\n\n"
+                    f"上記のツール結果を踏まえて、追加のツールが必要なら呼び出し、"
+                    f"不要なら日本語で分かりやすくユーザーに回答してください。"
+                )
             else:
-                response_text = fc_result["content"]
+                # MAX回ツールを呼んだ → 最終応答を生成
+                history_text = "\n".join(
+                    f"[ツール{i+1}] {h['tool']}: {str(h['result'])[:500]}"
+                    for i, h in enumerate(tool_history)
+                )
+                final_prompt = (
+                    f"{full_prompt}\n\n"
+                    f"【実行済みツール結果】\n{history_text}\n\n"
+                    f"上記の全てのツール結果を踏まえて、ユーザーに分かりやすく回答してください。"
+                )
+                response_text = await llm.generate(final_prompt, system_prompt)
+
+            if tool_history:
+                tools_used = " → ".join(h["tool"] for h in tool_history)
+                logger.info(f"[{session_id[:8]}] Tool chain: {tools_used} ({len(tool_history)} calls)")
 
         # 3. 応答を記憶（感情付き）
         await memory.short.add_message(session_id, "cocoro", response_text)
