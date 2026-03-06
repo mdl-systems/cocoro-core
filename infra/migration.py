@@ -32,10 +32,10 @@ MIGRATIONS = [
         "sql": """
             CREATE INDEX IF NOT EXISTS idx_emotion_history_created
                 ON emotion_history (created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_messages_session_created
-                ON messages (session_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_messages_emotion
-                ON messages (emotion) WHERE emotion IS NOT NULL AND emotion != 'neutral';
+            CREATE INDEX IF NOT EXISTS idx_conv_session_created
+                ON conversation_log (session_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_conv_emotion
+                ON conversation_log (emotion) WHERE emotion IS NOT NULL AND emotion != 'neutral';
         """,
     },
     {
@@ -54,7 +54,7 @@ MIGRATIONS = [
         "name": "add_self_observation_indexes",
         "description": "自己観察のタイプ・日時インデックス",
         "sql": """
-            CREATE INDEX IF NOT EXISTS idx_self_observations_type
+            CREATE INDEX IF NOT EXISTS idx_self_observations_type_created
                 ON self_observations (obs_type, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_self_observations_impact
                 ON self_observations (impact_score DESC);

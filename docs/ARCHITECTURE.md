@@ -497,7 +497,7 @@ cocoro-core/                        46 modules
 
 ```sql
 -- 記憶系 (5)
-messages              -- 全会話ログ (session_id, role, content, emotion)
+conversation_log      -- 全会話ログ (session_id, role, content, emotion)
 learning_log          -- 学習記録 (lesson, category, importance)
 thought_log           -- 思考記録 (question, reasoning, conclusion)
 decision_log          -- 判断記録 (question, decision, confidence, values)
