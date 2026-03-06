@@ -39,6 +39,8 @@ from personality.test.test_bench import PersonalityTestBench
 from evolution.self_observation import SelfObservationEngine
 from evolution.self_evaluation import SelfEvaluationEngine
 from evolution.improvement import ImprovementEngine
+from evolution.meta_cognition import MetaCognitionEngine
+from evolution.value_scoring import ValueScoringEngine
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -90,11 +92,13 @@ test_bench = None
 observer = None
 evaluator = None
 improver = None
+meta_cognition = None
+value_scoring = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -117,6 +121,8 @@ async def lifespan(app: FastAPI):
     observer = SelfObservationEngine(db_pool)
     evaluator = SelfEvaluationEngine(db_pool)
     improver = ImprovementEngine(db_pool, llm)
+    meta_cognition = MetaCognitionEngine(db_pool, llm)
+    value_scoring = ValueScoringEngine(db_pool, llm)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -334,6 +340,14 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         # 3. 応答を記憶（感情付き）
         await memory.short.add_message(session_id, "cocoro", response_text)
         await memory.long.save_message(session_id, "cocoro", response_text, emotion=emotion)
+
+        # 4. 自己観察: 会話を記録
+        try:
+            await observer.observe_conversation(session_id, req.message, response_text, emotion)
+            if action == "decide":
+                await observer.observe_decision(req.message, response_text[:200], confidence=0.7)
+        except Exception:
+            pass  # 観察の失敗はchat応答に影響させない
 
         return ChatRes(response=response_text, session_id=session_id, action=action, emotion=emotion, task_id=task_id)
 
@@ -830,6 +844,48 @@ async def evolution_report(hours: int = 24, _=Depends(verify_api_key)):
         "recent_plans": plans,
         "evolution_version": "1.0",
     }
+
+
+# === Meta Cognition (メタ認知) ===
+@app.get("/meta/awareness")
+async def self_awareness(_=Depends(verify_api_key)):
+    """自己認識状態"""
+    return await meta_cognition.get_self_awareness()
+
+@app.post("/meta/strategy")
+async def generate_strategy(objective: str = "", _=Depends(verify_api_key)):
+    """戦略立案"""
+    return await meta_cognition.generate_strategy(objective)
+
+@app.get("/meta/plan")
+async def long_term_plan(_=Depends(verify_api_key)):
+    """長期計画"""
+    return await meta_cognition.get_long_term_plan()
+
+
+# === Value Scoring (2層スコアリング) ===
+class ScoreReq(BaseModel):
+    response: str
+    context: str = ""
+
+class OptionsReq(BaseModel):
+    options: list[str]
+    context: str = ""
+
+@app.post("/scoring/response")
+async def score_response(req: ScoreReq, _=Depends(verify_api_key)):
+    """応答の価値観整合性スコア"""
+    return await value_scoring.score_response(req.response, req.context)
+
+@app.post("/scoring/options")
+async def score_options(req: OptionsReq, _=Depends(verify_api_key)):
+    """複数選択肢のValuesスコアリング"""
+    return await value_scoring.score_options(req.options, req.context)
+
+@app.post("/scoring/validate")
+async def validate_response(req: ScoreReq, _=Depends(verify_api_key)):
+    """応答検証＆必要ならリライト"""
+    return await value_scoring.validate_and_rewrite(req.response, req.context)
 
 
 # === v7: Organization (AI組織) ===
