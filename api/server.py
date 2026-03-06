@@ -28,8 +28,30 @@ from agent.worker_manager.manager import WorkerManager
 from memory.consolidation import MemoryConsolidation
 from personality.growth_tracker import GrowthTracker
 
-logging.basicConfig(level=settings.LOG_LEVEL,
-                    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+class JsonFormatter(logging.Formatter):
+    """JSON構造化ログフォーマッタ"""
+    def format(self, record):
+        import json as _json
+        log = {
+            "ts": self.formatTime(record),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info and record.exc_info[0]:
+            log["error"] = self.formatException(record.exc_info)
+        return _json.dumps(log, ensure_ascii=False)
+
+
+log_format = os.getenv("LOG_FORMAT", "json")
+if log_format == "json":
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    logging.root.handlers = [handler]
+    logging.root.setLevel(settings.LOG_LEVEL)
+else:
+    logging.basicConfig(level=settings.LOG_LEVEL,
+                        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("cocoro")
 
 # Globals
