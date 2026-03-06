@@ -41,6 +41,8 @@ from evolution.self_evaluation import SelfEvaluationEngine
 from evolution.improvement import ImprovementEngine
 from evolution.meta_cognition import MetaCognitionEngine
 from evolution.value_scoring import ValueScoringEngine
+from evolution.intelligence import IntelligenceExpansionEngine
+from evolution.safety import SafetyLayer
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -94,11 +96,13 @@ evaluator = None
 improver = None
 meta_cognition = None
 value_scoring = None
+intelligence = None
+safety = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -123,6 +127,8 @@ async def lifespan(app: FastAPI):
     improver = ImprovementEngine(db_pool, llm)
     meta_cognition = MetaCognitionEngine(db_pool, llm)
     value_scoring = ValueScoringEngine(db_pool, llm)
+    intelligence = IntelligenceExpansionEngine(db_pool)
+    safety = SafetyLayer(db_pool)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -886,6 +892,83 @@ async def score_options(req: OptionsReq, _=Depends(verify_api_key)):
 async def validate_response(req: ScoreReq, _=Depends(verify_api_key)):
     """応答検証＆必要ならリライト"""
     return await value_scoring.validate_and_rewrite(req.response, req.context)
+
+
+# === Intelligence Expansion (知能拡張) ===
+class KnowledgeReq(BaseModel):
+    topic: str
+    content: str
+    source: str = "manual"
+    confidence: float = 0.7
+
+@app.post("/intelligence/knowledge")
+async def add_knowledge(req: KnowledgeReq, _=Depends(verify_api_key)):
+    """知識追加"""
+    return await intelligence.add_knowledge(req.topic, req.content, req.source, req.confidence)
+
+@app.get("/intelligence/knowledge/search")
+async def search_knowledge(query: str, limit: int = 10, _=Depends(verify_api_key)):
+    """知識検索"""
+    return {"results": await intelligence.search_knowledge(query, limit)}
+
+@app.get("/intelligence/skills")
+async def get_skills(category: str = "", _=Depends(verify_api_key)):
+    """スキル一覧"""
+    return {"skills": await intelligence.get_skills(category or None)}
+
+class SkillReq(BaseModel):
+    name: str
+    category: str = "general"
+    proficiency: float = 0.1
+
+@app.post("/intelligence/skills")
+async def register_skill(req: SkillReq, _=Depends(verify_api_key)):
+    """スキル登録"""
+    return await intelligence.register_skill(req.name, req.category, req.proficiency)
+
+@app.get("/intelligence/tools")
+async def get_tool_stats(_=Depends(verify_api_key)):
+    """ツール使用統計"""
+    return await intelligence.get_tool_stats()
+
+@app.get("/intelligence/report")
+async def intelligence_report(_=Depends(verify_api_key)):
+    """知能拡張レポート"""
+    return await intelligence.get_intelligence_report()
+
+
+# === Safety Layer (安全性) ===
+@app.get("/safety/alignment")
+async def check_alignment(_=Depends(verify_api_key)):
+    """アライメントチェック"""
+    return await safety.check_alignment()
+
+@app.get("/safety/modification")
+async def check_modification(mod_type: str = "value", _=Depends(verify_api_key)):
+    """自己変更許可チェック"""
+    return await safety.check_modification_allowed(mod_type)
+
+@app.get("/safety/report")
+async def safety_report(_=Depends(verify_api_key)):
+    """安全性レポート"""
+    return await safety.get_safety_report()
+
+@app.get("/v5/report")
+async def v5_full_report(_=Depends(verify_api_key)):
+    """v5 自己進化総合レポート"""
+    evolution = await observer.get_stats(24)
+    evaluation = await evaluator.evaluate(24)
+    intel = await intelligence.get_intelligence_report()
+    safe = await safety.get_safety_report()
+    awareness = await meta_cognition.get_self_awareness()
+    return {
+        "version": "5.0",
+        "observation_stats": evolution,
+        "self_evaluation": evaluation,
+        "intelligence": intel,
+        "safety": safe,
+        "self_awareness": awareness,
+    }
 
 
 # === v7: Organization (AI組織) ===

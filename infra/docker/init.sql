@@ -316,6 +316,47 @@ CREATE TABLE improvement_plans (
 CREATE INDEX idx_plans_status ON improvement_plans(status);
 
 -- ============================================
+-- Knowledge Base: 知識ストア (v5)
+-- ============================================
+CREATE TABLE knowledge_base (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    topic TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT DEFAULT 'conversation',
+    confidence REAL DEFAULT 0.7 CHECK (confidence BETWEEN 0.0 AND 1.0),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_kb_topic ON knowledge_base USING gin(topic gin_trgm_ops);
+
+-- ============================================
+-- Skills: スキル管理 (v5)
+-- ============================================
+CREATE TABLE skills (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    category TEXT DEFAULT 'general',
+    proficiency REAL DEFAULT 0.1 CHECK (proficiency BETWEEN 0.0 AND 1.0),
+    practice_count INTEGER DEFAULT 1,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE TRIGGER skills_updated BEFORE UPDATE ON skills
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+-- ============================================
+-- Tool Usage Log: ツール使用ログ (v5)
+-- ============================================
+CREATE TABLE tool_usage_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tool_name TEXT NOT NULL,
+    success BOOLEAN DEFAULT true,
+    duration_ms INTEGER DEFAULT 0,
+    context TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_tool_usage_name ON tool_usage_log(tool_name);
+
+-- ============================================
 -- Goals: 目標管理 (v2/v4 要件)
 -- ============================================
 CREATE TABLE goals (
