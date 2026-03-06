@@ -25,8 +25,17 @@ class Settings:
     API_PORT: int = int(os.getenv("API_PORT", "8000"))
     COCORO_API_KEY: str = os.getenv("COCORO_API_KEY", "")
 
+    # === JWT ===
+    JWT_SECRET: str = os.getenv("JWT_SECRET", "")  # 空=API Key認証にフォールバック
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_EXPIRE_HOURS: int = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+
+    # === CORS ===
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")  # カンマ区切り or *
+
     # === Logging ===
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FILE: str = os.getenv("LOG_FILE", "/var/log/cocoro/cocoro.log")  # 空=ファイル出力なし
 
     # === Scheduler ===
     CONSOLIDATION_INTERVAL_HOURS: int = int(os.getenv("CONSOLIDATION_INTERVAL_HOURS", "6"))

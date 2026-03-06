@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import asyncpg
 
@@ -46,6 +47,7 @@ from evolution.safety import SafetyLayer
 from personality.cognitive_profile import CognitiveProfileEngine
 from personality.calibration import PersonalityCalibrationEngine
 from personality.clone_engine import PersonalityCloneEngine
+from infra.migration import MigrationRunner
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -63,14 +65,32 @@ class JsonFormatter(logging.Formatter):
 
 
 log_format = os.getenv("LOG_FORMAT", "json")
+handlers = []
+
+# コンソールハンドラ
+console_handler = logging.StreamHandler()
 if log_format == "json":
-    handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
-    logging.root.handlers = [handler]
-    logging.root.setLevel(settings.LOG_LEVEL)
+    console_handler.setFormatter(JsonFormatter())
 else:
-    logging.basicConfig(level=settings.LOG_LEVEL,
-                        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    console_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
+handlers.append(console_handler)
+
+# A-6: ファイルログハンドラ (RotatingFileHandler)
+if settings.LOG_FILE:
+    try:
+        from logging.handlers import RotatingFileHandler
+        log_dir = os.path.dirname(settings.LOG_FILE)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            settings.LOG_FILE, maxBytes=50*1024*1024, backupCount=5, encoding="utf-8")
+        file_handler.setFormatter(JsonFormatter())
+        handlers.append(file_handler)
+    except Exception as e:
+        print(f"Warning: Could not setup file logging: {e}")
+
+logging.root.handlers = handlers
+logging.root.setLevel(settings.LOG_LEVEL)
 logger = logging.getLogger("cocoro")
 
 # Globals
@@ -104,12 +124,21 @@ safety = None
 cognitive = None
 calibration = None
 clone_engine = None
+migration_runner = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
+
+    # A-5: 自動マイグレーション
+    migration_runner = MigrationRunner(db_pool)
+    try:
+        migrate_result = await migration_runner.migrate()
+        logger.info(f"Migration: {migrate_result.get('status', 'unknown')} (v{migrate_result.get('current_version', '?')})")
+    except Exception as e:
+        logger.warning(f"Migration warning: {e}")
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
     reasoning = ReasoningEngine(personality, memory)
@@ -202,6 +231,21 @@ async def _consolidation_scheduler(interval_hours: int):
 app = FastAPI(title="cocoro-core", version="1.0.0",
               description="Personality AI Operating System", lifespan=lifespan)
 
+# === A-4: CORS Middleware ===
+cors_origins = settings.CORS_ORIGINS
+if cors_origins == "*":
+    allow_origins = ["*"]
+else:
+    allow_origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # === Global Exception Handlers ===
 from fastapi.responses import JSONResponse
@@ -238,16 +282,88 @@ async def global_error_handler(request: Request, exc: Exception):
     })
 
 
-# === Auth ===
+# === Auth (A-4: JWT + API Key デュアル認証) ===
 security = HTTPBearer(auto_error=False)
 
+
+def _verify_jwt(token: str) -> dict | None:
+    """JWT トークンを検証。成功時は payload を返す。失敗時は None。"""
+    if not settings.JWT_SECRET:
+        return None  # JWT未設定
+    try:
+        import hashlib, hmac, base64, json as _json, time
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        # HS256 署名検証
+        signing_input = f"{parts[0]}.{parts[1]}".encode()
+        signature = hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+        # base64url decode
+        def b64_decode(s):
+            s += "=" * (4 - len(s) % 4)
+            return base64.urlsafe_b64decode(s)
+        if not hmac.compare_digest(signature, b64_decode(parts[2])):
+            return None
+        payload = _json.loads(b64_decode(parts[1]))
+        # 有効期限チェック
+        if payload.get("exp") and payload["exp"] < time.time():
+            return None
+        return payload
+    except Exception:
+        return None
+
+
 async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """APIキー認証。COCORO_API_KEY未設定時は認証スキップ（開発用）"""
-    api_key = settings.COCORO_API_KEY
-    if not api_key:
-        return  # キー未設定 = 認証なし（開発環境）
-    if not credentials or credentials.credentials != api_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+    """認証: JWT → API Key → 未設定時スキップ（開発用）"""
+    if not credentials:
+        # 認証情報なし: キー未設定なら通過
+        if not settings.COCORO_API_KEY and not settings.JWT_SECRET:
+            return
+        raise HTTPException(status_code=401, detail="認証が必要です")
+
+    token = credentials.credentials
+
+    # 1. JWT認証を試行
+    if settings.JWT_SECRET:
+        payload = _verify_jwt(token)
+        if payload:
+            return payload  # JWT認証成功 → payloadを返す
+
+    # 2. API Key認証にフォールバック
+    if settings.COCORO_API_KEY and token == settings.COCORO_API_KEY:
+        return  # API Key認証成功
+
+    # 3. 両方未設定なら通過（開発環境）
+    if not settings.COCORO_API_KEY and not settings.JWT_SECRET:
+        return
+
+    raise HTTPException(status_code=401, detail="無効な認証トークンです")
+
+
+# === JWT Token 発行エンドポイント ===
+class TokenReq(BaseModel):
+    api_key: str
+
+@app.post("/auth/token")
+async def issue_token(req: TokenReq):
+    """API Key を検証して JWT トークンを発行"""
+    if not settings.JWT_SECRET:
+        raise HTTPException(status_code=501, detail="JWT未設定。API Key認証を使用してください")
+    if not settings.COCORO_API_KEY or req.api_key != settings.COCORO_API_KEY:
+        raise HTTPException(status_code=401, detail="無効なAPI Key")
+
+    import hashlib, hmac, base64, json as _json, time
+    now = int(time.time())
+    payload = {"sub": "cocoro", "iat": now, "exp": now + settings.JWT_EXPIRE_HOURS * 3600}
+    def b64_encode(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+    header = b64_encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = b64_encode(_json.dumps(payload).encode())
+    signing_input = f"{header}.{body}".encode()
+    signature = b64_encode(hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
+    token = f"{header}.{body}.{signature}"
+
+    return {"token": token, "expires_in": settings.JWT_EXPIRE_HOURS * 3600, "token_type": "Bearer"}
 
 
 # === Health (認証不要) ===
@@ -1107,6 +1223,18 @@ async def clone_diff(req: Request, _=Depends(verify_api_key)):
     """現在の人格とバックアップの差分"""
     data = await req.json()
     return await clone_engine.get_diff(data)
+
+
+# === A-5: Database Migration ===
+@app.get("/migrate/status")
+async def migrate_status(_=Depends(verify_api_key)):
+    """マイグレーション状態"""
+    return await migration_runner.get_status()
+
+@app.post("/migrate/run")
+async def migrate_run(_=Depends(verify_api_key)):
+    """マイグレーション実行"""
+    return await migration_runner.migrate()
 
 
 # === v7: Organization (AI組織) ===
