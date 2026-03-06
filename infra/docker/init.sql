@@ -135,7 +135,7 @@ CREATE TABLE tasks (
     title TEXT NOT NULL,
     description TEXT,
     priority INTEGER DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'done', 'failed', 'cancelled')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'queued', 'running', 'done', 'failed', 'cancelled')),
     assigned_agent TEXT,
     result TEXT,
     error TEXT,
