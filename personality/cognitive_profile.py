@@ -43,7 +43,7 @@ class CognitiveProfileEngine:
 
         # 思考記録からの分析
         thoughts = await self.db.fetchrow(
-            "SELECT COUNT(*) as cnt FROM reasoning_log")
+            "SELECT COUNT(*) as cnt FROM thought_log")
 
         # 値の計算
         total_decisions = sum(r["cnt"] for r in categories) if categories else 0
