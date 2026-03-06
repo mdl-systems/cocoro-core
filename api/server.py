@@ -33,6 +33,9 @@ from agent.event_bus import EventBus
 from agent.organization.manager import OrganizationManager
 from brain.tools.tool_registry import ToolExecutor, TOOL_DEFINITIONS
 from governance.governance_engine import GovernanceManager
+from personality.setup.boot_wizard import BootWizard
+from personality.test.decision_sampling import DecisionSamplingEngine
+from personality.test.test_bench import PersonalityTestBench
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -78,11 +81,14 @@ event_bus = None
 org = None
 tools = None
 governance = None
+boot_wizard = None
+sampling = None
+test_bench = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
@@ -99,6 +105,9 @@ async def lifespan(app: FastAPI):
     tools = ToolExecutor(memory=memory, worker=worker, org=org,
                          personality=personality, db=db_pool, router=router)
     governance = GovernanceManager(db_pool)
+    boot_wizard = BootWizard(db_pool, llm)
+    sampling = DecisionSamplingEngine(db_pool)
+    test_bench = PersonalityTestBench(db_pool, llm)
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -693,6 +702,77 @@ async def governance_check(req: GovernanceCheckReq, _=Depends(verify_api_key)):
     """テキストの倫理チェック"""
     result = await governance.check_input(req.text)
     return result.to_dict()
+
+
+# === Setup (人格形成) ===
+class SetupStartReq(BaseModel):
+    mode: str = "boot"  # "boot" (40問) or "deep" (80問)
+
+@app.post("/setup/start")
+async def setup_start(req: SetupStartReq = SetupStartReq(), _=Depends(verify_api_key)):
+    """人格形成セッションを開始"""
+    return boot_wizard.start_session(req.mode)
+
+class SetupAnswerReq(BaseModel):
+    session_id: str
+    answer: str
+
+@app.post("/setup/answer")
+async def setup_answer(req: SetupAnswerReq, _=Depends(verify_api_key)):
+    """質問に回答"""
+    return boot_wizard.answer(req.session_id, req.answer)
+
+@app.get("/setup/progress/{session_id}")
+async def setup_progress(session_id: str, _=Depends(verify_api_key)):
+    """進捗を確認"""
+    return boot_wizard.get_progress(session_id)
+
+@app.get("/setup/result/{session_id}")
+async def setup_result(session_id: str, _=Depends(verify_api_key)):
+    """分析結果を取得"""
+    return await boot_wizard.get_result(session_id)
+
+
+# === Decision Sampling (意思決定テスト) ===
+@app.post("/test/sampling/start")
+async def sampling_start(_=Depends(verify_api_key)):
+    """Decision Sampling セッション開始"""
+    return sampling.start()
+
+class SamplingAnswerReq(BaseModel):
+    session_id: str
+    option_index: int
+
+@app.post("/test/sampling/answer")
+async def sampling_answer(req: SamplingAnswerReq, _=Depends(verify_api_key)):
+    """シナリオに回答"""
+    return sampling.answer(req.session_id, req.option_index)
+
+@app.get("/test/sampling/result/{session_id}")
+async def sampling_result(session_id: str, _=Depends(verify_api_key)):
+    """Decision Vector 算出"""
+    return await sampling.get_result(session_id)
+
+
+# === Test Bench (人格一致率テスト) ===
+@app.post("/test/bench/start")
+async def bench_start(_=Depends(verify_api_key)):
+    """Test Bench セッション開始"""
+    return test_bench.start()
+
+class BenchAnswerReq(BaseModel):
+    session_id: str
+    choice: int
+
+@app.post("/test/bench/answer")
+async def bench_answer(req: BenchAnswerReq, _=Depends(verify_api_key)):
+    """質問に回答"""
+    return test_bench.answer(req.session_id, req.choice)
+
+@app.get("/test/bench/score/{session_id}")
+async def bench_score(session_id: str, _=Depends(verify_api_key)):
+    """一致率スコアを取得"""
+    return await test_bench.get_score(session_id)
 
 
 # === v7: Organization (AI組織) ===
