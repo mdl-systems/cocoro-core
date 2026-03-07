@@ -20,8 +20,16 @@ services:
       - POSTGRES_DB=cocoro_db
       - REDIS_URL=redis://cocoro-redis:6379/0
       - COCORO_API_KEY=${COCORO_API_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - IP_WHITELIST=${IP_WHITELIST:-}
+      - IP_BLACKLIST=${IP_BLACKLIST:-}
+      - FORCE_HTTPS=${FORCE_HTTPS:-false}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - LOGIN_MAX_FAILURES=${LOGIN_MAX_FAILURES:-10}
+      - LOGIN_LOCKOUT_SECONDS=${LOGIN_LOCKOUT_SECONDS:-300}
     depends_on:
       cocoro-postgres:
         condition: service_healthy

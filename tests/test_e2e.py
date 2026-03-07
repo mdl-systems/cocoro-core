@@ -714,3 +714,33 @@ class TestResponseFormatE2E:
         """ダッシュボードはHTML形式で応答する"""
         r = await client.get("/dashboard")
         assert "text/html" in r.headers["content-type"]
+
+
+# === D-10: Security Tests ===
+class TestSecurityE2E:
+    @pytest.mark.asyncio
+    async def test_security_status(self, client):
+        """セキュリティステータスを取得"""
+        r = await client.get("/security/status")
+        assert r.status_code == 200
+        data = r.json()
+        assert "rate_limiting" in data
+        assert "ip_filter" in data
+        assert "login_throttle" in data
+        assert "auth_mode" in data
+
+    @pytest.mark.asyncio
+    async def test_security_headers_present(self, client):
+        """セキュリティヘッダーが付与されている"""
+        r = await client.get("/health")
+        assert r.status_code == 200
+        assert r.headers.get("X-Content-Type-Options") == "nosniff"
+        assert r.headers.get("X-Frame-Options") == "DENY"
+        assert r.headers.get("X-XSS-Protection") == "1; mode=block"
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_header(self, client):
+        """Rate Limit残回数ヘッダーが付与されている"""
+        r = await client.get("/health")
+        assert r.status_code == 200
+        assert "X-RateLimit-Remaining" in r.headers

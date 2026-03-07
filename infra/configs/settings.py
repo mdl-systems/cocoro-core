@@ -43,6 +43,14 @@ class Settings:
     # === Webhook ===
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")  # Discord/Slack webhook
 
+    # === Security (D-10) ===
+    IP_WHITELIST: str = os.getenv("IP_WHITELIST", "")  # カンマ区切り。空=全許可
+    IP_BLACKLIST: str = os.getenv("IP_BLACKLIST", "")  # カンマ区切り。空=ブロックなし
+    FORCE_HTTPS: bool = os.getenv("FORCE_HTTPS", "false").lower() in ("true", "1", "yes")
+    RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("true", "1", "yes")
+    LOGIN_MAX_FAILURES: int = int(os.getenv("LOGIN_MAX_FAILURES", "10"))
+    LOGIN_LOCKOUT_SECONDS: int = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "300"))
+
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"

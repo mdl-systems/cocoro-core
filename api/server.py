@@ -364,8 +364,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# === D-10: Security Middleware ===
+from api.security import SecurityMiddleware, ip_filter, login_throttle, rate_limiter
 
-# === Global Exception Handlers ===
+# IP Filter 設定
+ip_filter.configure(
+    whitelist_csv=settings.IP_WHITELIST,
+    blacklist_csv=settings.IP_BLACKLIST,
+)
+
+# Login Throttle 設定
+login_throttle.max_failures = settings.LOGIN_MAX_FAILURES
+login_throttle.lockout_seconds = settings.LOGIN_LOCKOUT_SECONDS
+
+# Middleware 登録
+if settings.RATE_LIMIT_ENABLED:
+    app.add_middleware(SecurityMiddleware, force_https=settings.FORCE_HTTPS)
+    logger.info(f"Security middleware enabled (HTTPS={settings.FORCE_HTTPS}, IP whitelist={bool(settings.IP_WHITELIST)})")
+
 from fastapi.responses import JSONResponse
 import traceback as _tb
 
@@ -463,12 +479,20 @@ class TokenReq(BaseModel):
     api_key: str
 
 @app.post("/auth/token")
-async def issue_token(req: TokenReq):
+async def issue_token(req: TokenReq, request: Request):
     """API Key を検証して JWT トークンを発行"""
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown").split(",")[0].strip()
+
     if not settings.JWT_SECRET:
         raise HTTPException(status_code=501, detail="JWT未設定。API Key認証を使用してください")
     if not settings.COCORO_API_KEY or req.api_key != settings.COCORO_API_KEY:
+        # D-10: 認証失敗を記録
+        login_throttle.record_failure(client_ip)
+        logger.warning(f"Auth failure from {client_ip}")
         raise HTTPException(status_code=401, detail="無効なAPI Key")
+
+    # D-10: 認証成功でリセット
+    login_throttle.record_success(client_ip)
 
     import hashlib, hmac, base64, json as _json, time
     now = int(time.time())
@@ -482,6 +506,20 @@ async def issue_token(req: TokenReq):
     token = f"{header}.{body}.{signature}"
 
     return {"token": token, "expires_in": settings.JWT_EXPIRE_HOURS * 3600, "token_type": "Bearer"}
+
+
+# === D-10: Security Management API ===
+@app.get("/security/status")
+async def security_status(_=Depends(verify_api_key)):
+    """セキュリティ状況"""
+    return {
+        "rate_limiting": settings.RATE_LIMIT_ENABLED,
+        "force_https": settings.FORCE_HTTPS,
+        "ip_filter": ip_filter.get_config(),
+        "login_throttle": login_throttle.get_stats(),
+        "auth_mode": "jwt+apikey" if settings.JWT_SECRET else ("apikey" if settings.COCORO_API_KEY else "open"),
+    }
+
 
 
 # === Health (認証不要) ===
