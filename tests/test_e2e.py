@@ -185,8 +185,25 @@ server_module.org.list_agents = MagicMock(return_value=[])
 server_module.org.register_agent = AsyncMock(return_value={"agent_id": "a1"})
 server_module.org.delegate_task = AsyncMock(return_value={"task_id": "t1"})
 
+# Governance — check_input は GovernanceResult.to_dict() を呼ぶため
+class _MockGovernanceResult:
+    passed = True
+    check_type = "ethics"
+    risk_level = "safe"
+    flags = []
+    reason = ""
+    suggestion = ""
+    def to_dict(self):
+        return {"passed": True, "check_type": "ethics", "risk_level": "safe",
+                "flags": [], "reason": "", "suggestion": ""}
+
 server_module.governance = MagicMock()
-server_module.governance.check_input = MagicMock(return_value={"allowed": True, "reason": "ok"})
+server_module.governance.check_input = AsyncMock(return_value=_MockGovernanceResult())
+server_module.governance.get_full_report = AsyncMock(return_value={
+    "alignment": {"status": "healthy"},
+    "modification_history": {"count": 0},
+    "governance_version": "1.0",
+})
 
 server_module.tools = MagicMock()
 
@@ -714,6 +731,54 @@ class TestResponseFormatE2E:
         """ダッシュボードはHTML形式で応答する"""
         r = await client.get("/dashboard")
         assert "text/html" in r.headers["content-type"]
+
+
+# === Goals (目標管理) ===
+class TestGoalsE2E:
+    @pytest.mark.asyncio
+    async def test_list_goals(self, client):
+        r = await client.get("/goals")
+        assert r.status_code == 200
+        assert "goals" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_create_goal(self, client):
+        r = await client.post("/goals",
+            json={"title": "テスト目標", "description": "E2E用", "goal_type": "short_term", "priority": 5})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "created"
+        assert "goal" in data
+
+    @pytest.mark.asyncio
+    async def test_get_active_goals(self, client):
+        r = await client.get("/goals?status=active")
+        assert r.status_code == 200
+
+
+# === Governance (ガバナンス) ===
+class TestGovernanceE2E:
+    @pytest.mark.asyncio
+    async def test_governance_report(self, client):
+        r = await client.get("/governance/report")
+        assert r.status_code == 200
+        data = r.json()
+        assert "alignment" in data
+        assert "governance_version" in data
+
+    @pytest.mark.asyncio
+    async def test_governance_log(self, client):
+        r = await client.get("/governance/log")
+        assert r.status_code == 200
+        assert "log" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_governance_check(self, client):
+        r = await client.post("/governance/check", json={"text": "これは安全なテキストです"})
+        assert r.status_code == 200
+        data = r.json()
+        assert "passed" in data
+        assert "risk_level" in data
 
 
 # === D-10: Security Tests ===
