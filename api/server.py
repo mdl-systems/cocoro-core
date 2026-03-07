@@ -1121,12 +1121,12 @@ async def get_observation_stats(hours: int = 24, _=Depends(verify_api_key)):
 @app.get("/evolution/evaluate")
 async def self_evaluate(hours: int = 24, _=Depends(verify_api_key)):
     """自己評価実行"""
-    return evaluator.evaluate(hours)
+    return await evaluator.evaluate(hours)
 
 @app.post("/evolution/improve")
 async def generate_improvement(hours: int = 24, _=Depends(verify_api_key)):
     """改善計画生成"""
-    evaluation = evaluator.evaluate(hours)
+    evaluation = await evaluator.evaluate(hours)
     plan = improver.generate_plan(evaluation)
     return plan
 
@@ -1145,7 +1145,7 @@ async def get_improvement_plans(limit: int = 10, _=Depends(verify_api_key)):
 async def evolution_report(hours: int = 24, _=Depends(verify_api_key)):
     """自己進化総合レポート"""
     stats = observer.get_stats(hours)
-    evaluation = evaluator.evaluate(hours)
+    evaluation = await evaluator.evaluate(hours)
     plans = improver.get_plans(5)
     return {
         "observation_stats": stats,
@@ -1260,7 +1260,7 @@ async def safety_report(_=Depends(verify_api_key)):
 async def v5_full_report(_=Depends(verify_api_key)):
     """v5 自己進化総合レポート"""
     evolution = observer.get_stats(24)
-    evaluation = evaluator.evaluate(24)
+    evaluation = await evaluator.evaluate(24)
     intel = intelligence.get_intelligence_report()
     safe = safety.get_safety_report()
     awareness = meta_cognition.get_self_awareness()
