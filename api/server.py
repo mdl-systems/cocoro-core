@@ -1111,42 +1111,42 @@ async def bench_score(session_id: str, _=Depends(verify_api_key)):
 @app.get("/evolution/observations")
 async def get_observations(limit: int = 50, _=Depends(verify_api_key)):
     """自己観察ログ取得"""
-    return {"observations": await observer.get_recent(limit)}
+    return {"observations": observer.get_recent(limit)}
 
 @app.get("/evolution/observations/stats")
 async def get_observation_stats(hours: int = 24, _=Depends(verify_api_key)):
     """観察統計"""
-    return await observer.get_stats(hours)
+    return observer.get_stats(hours)
 
 @app.get("/evolution/evaluate")
 async def self_evaluate(hours: int = 24, _=Depends(verify_api_key)):
     """自己評価実行"""
-    return await evaluator.evaluate(hours)
+    return evaluator.evaluate(hours)
 
 @app.post("/evolution/improve")
 async def generate_improvement(hours: int = 24, _=Depends(verify_api_key)):
     """改善計画生成"""
-    evaluation = await evaluator.evaluate(hours)
-    plan = await improver.generate_plan(evaluation)
+    evaluation = evaluator.evaluate(hours)
+    plan = improver.generate_plan(evaluation)
     return plan
 
 @app.post("/evolution/improve/{plan_id}/execute")
 async def execute_improvement(plan_id: str, _=Depends(verify_api_key)):
     """改善計画実行"""
-    return await improver.execute_plan(plan_id)
+    return improver.execute_plan(plan_id)
 
 @app.get("/evolution/plans")
 async def get_improvement_plans(limit: int = 10, _=Depends(verify_api_key)):
     """改善計画一覧"""
-    plans = await improver.get_plans(limit)
+    plans = improver.get_plans(limit)
     return {"plans": plans}
 
 @app.get("/evolution/report")
 async def evolution_report(hours: int = 24, _=Depends(verify_api_key)):
     """自己進化総合レポート"""
-    stats = await observer.get_stats(hours)
-    evaluation = await evaluator.evaluate(hours)
-    plans = await improver.get_plans(5)
+    stats = observer.get_stats(hours)
+    evaluation = evaluator.evaluate(hours)
+    plans = improver.get_plans(5)
     return {
         "observation_stats": stats,
         "self_evaluation": evaluation,
@@ -1159,17 +1159,17 @@ async def evolution_report(hours: int = 24, _=Depends(verify_api_key)):
 @app.get("/meta/awareness")
 async def self_awareness(_=Depends(verify_api_key)):
     """自己認識状態"""
-    return await meta_cognition.get_self_awareness()
+    return meta_cognition.get_self_awareness()
 
 @app.post("/meta/strategy")
 async def generate_strategy(objective: str = "", _=Depends(verify_api_key)):
     """戦略立案"""
-    return await meta_cognition.generate_strategy(objective)
+    return meta_cognition.generate_strategy(objective)
 
 @app.get("/meta/plan")
 async def long_term_plan(_=Depends(verify_api_key)):
     """長期計画"""
-    return await meta_cognition.get_long_term_plan()
+    return meta_cognition.get_long_term_plan()
 
 
 # === Value Scoring (2層スコアリング) ===
@@ -1184,17 +1184,17 @@ class OptionsReq(BaseModel):
 @app.post("/scoring/response")
 async def score_response(req: ScoreReq, _=Depends(verify_api_key)):
     """応答の価値観整合性スコア"""
-    return await value_scoring.score_response(req.response, req.context)
+    return value_scoring.score_response(req.response, req.context)
 
 @app.post("/scoring/options")
 async def score_options(req: OptionsReq, _=Depends(verify_api_key)):
     """複数選択肢のValuesスコアリング"""
-    return await value_scoring.score_options(req.options, req.context)
+    return value_scoring.score_options(req.options, req.context)
 
 @app.post("/scoring/validate")
 async def validate_response(req: ScoreReq, _=Depends(verify_api_key)):
     """応答検証＆必要ならリライト"""
-    return await value_scoring.validate_and_rewrite(req.response, req.context)
+    return value_scoring.validate_and_rewrite(req.response, req.context)
 
 
 # === Intelligence Expansion (知能拡張) ===
@@ -1207,7 +1207,7 @@ class KnowledgeReq(BaseModel):
 @app.post("/intelligence/knowledge")
 async def add_knowledge(req: KnowledgeReq, _=Depends(verify_api_key)):
     """知識追加"""
-    return await intelligence.add_knowledge(req.topic, req.content, req.source, req.confidence)
+    return intelligence.add_knowledge(req.topic, req.content, req.source, req.confidence)
 
 @app.get("/intelligence/knowledge/search")
 async def search_knowledge(query: str, limit: int = 10, _=Depends(verify_api_key)):
@@ -1227,43 +1227,43 @@ class SkillReq(BaseModel):
 @app.post("/intelligence/skills")
 async def register_skill(req: SkillReq, _=Depends(verify_api_key)):
     """スキル登録"""
-    return await intelligence.register_skill(req.name, req.category, req.proficiency)
+    return intelligence.register_skill(req.name, req.category, req.proficiency)
 
 @app.get("/intelligence/tools")
 async def get_tool_stats(_=Depends(verify_api_key)):
     """ツール使用統計"""
-    return await intelligence.get_tool_stats()
+    return intelligence.get_tool_stats()
 
 @app.get("/intelligence/report")
 async def intelligence_report(_=Depends(verify_api_key)):
     """知能拡張レポート"""
-    return await intelligence.get_intelligence_report()
+    return intelligence.get_intelligence_report()
 
 
 # === Safety Layer (安全性) ===
 @app.get("/safety/alignment")
 async def check_alignment(_=Depends(verify_api_key)):
     """アライメントチェック"""
-    return await safety.check_alignment()
+    return safety.check_alignment()
 
 @app.get("/safety/modification")
 async def check_modification(mod_type: str = "value", _=Depends(verify_api_key)):
     """自己変更許可チェック"""
-    return await safety.check_modification_allowed(mod_type)
+    return safety.check_modification_allowed(mod_type)
 
 @app.get("/safety/report")
 async def safety_report(_=Depends(verify_api_key)):
     """安全性レポート"""
-    return await safety.get_safety_report()
+    return safety.get_safety_report()
 
 @app.get("/v5/report")
 async def v5_full_report(_=Depends(verify_api_key)):
     """v5 自己進化総合レポート"""
-    evolution = await observer.get_stats(24)
-    evaluation = await evaluator.evaluate(24)
-    intel = await intelligence.get_intelligence_report()
-    safe = await safety.get_safety_report()
-    awareness = await meta_cognition.get_self_awareness()
+    evolution = observer.get_stats(24)
+    evaluation = evaluator.evaluate(24)
+    intel = intelligence.get_intelligence_report()
+    safe = safety.get_safety_report()
+    awareness = meta_cognition.get_self_awareness()
     return {
         "version": "5.0",
         "observation_stats": evolution,
@@ -1278,14 +1278,14 @@ async def v5_full_report(_=Depends(verify_api_key)):
 @app.get("/personality/cognitive")
 async def get_cognitive_profile(_=Depends(verify_api_key)):
     """認知プロファイル (Cognitive Style + Risk Profile)"""
-    return await cognitive.analyze()
+    return cognitive.analyze()
 
 
 # === Personality Calibration (v2.5: 人格一致率テスト) ===
 @app.post("/calibration/start")
 async def start_calibration(_=Depends(verify_api_key)):
     """キャリブレーション開始 (50問)"""
-    return await calibration.start_calibration()
+    return calibration.start_calibration()
 
 class CalibrationAnswers(BaseModel):
     session_id: str
@@ -1295,18 +1295,18 @@ class CalibrationAnswers(BaseModel):
 async def submit_calibration(req: CalibrationAnswers, _=Depends(verify_api_key)):
     """キャリブレーション回答提出"""
     int_answers = {int(k): int(v) for k, v in req.answers.items()}
-    return await calibration.submit_answers(req.session_id, int_answers)
+    return calibration.submit_answers(req.session_id, int_answers)
 
 @app.get("/calibration/history")
 async def calibration_history(_=Depends(verify_api_key)):
     """キャリブレーション履歴"""
-    return {"history": await calibration.get_calibration_history()}
+    return {"history": calibration.get_calibration_history()}
 
 @app.get("/v2/status")
 async def v2_status(_=Depends(verify_api_key)):
     """v2/v2.5 人格形成ステータス"""
-    cog = await cognitive.analyze()
-    cal_history = await calibration.get_calibration_history()
+    cog = cognitive.analyze()
+    cal_history = calibration.get_calibration_history()
     return {
         "version": "2.5",
         "cognitive_profile": cog,
