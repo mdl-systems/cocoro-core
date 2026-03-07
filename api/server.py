@@ -60,6 +60,12 @@ from agent.integrations import IntegrationManager
 from personality.templates import PersonalityTemplateManager
 from infra.monitoring import MonitoringManager
 from infra.i18n import I18nManager
+from personality.personality_vector import PersonalityVector
+from personality.models.personality_profile import PersonalityProfile
+from personality.animal_personality import list_animals
+from personality.quick_questions import get_questions, apply_answers
+from personality.personality_learning import PersonalityLearning
+from compatibility.compatibility_engine import CompatibilityEngine
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -150,11 +156,14 @@ templates = None
 monitoring = None
 i18n = None
 ws_connections: list = []
+personality_profiles: dict = {}
+personality_learning_engine = None
+compat_engine = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -230,6 +239,10 @@ async def lifespan(app: FastAPI):
 
     # D-8: 多言語対応
     i18n = I18nManager(default_lang=os.getenv("DEFAULT_LANG", "ja"))
+
+    # 人格ベクトル32次元 + 相性エンジン
+    personality_learning_engine = PersonalityLearning()
+    compat_engine = CompatibilityEngine()
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -2211,3 +2224,117 @@ async def translate_message(key: str, lang: str = None, _=Depends(verify_api_key
     return {"key": key,
             "message": i18n.get_message(key, lang),
             "language": lang or i18n.default_lang}
+
+# ============================================================
+# 人格ベクトル 32次元システム
+# ============================================================
+
+@app.post("/personality/init", tags=["personality-vector"])
+async def personality_init(request: Request, _=Depends(verify_api_key)):
+    """生年月日・血液型・動物タイプから人格プロファイルを生成"""
+    from datetime import date as dt_date
+    body = await request.json()
+    birthdate = dt_date.fromisoformat(body["birthdate"])
+    blood_type = body.get("blood_type", "O")
+    animal_type = body.get("animal_type", "wolf")
+
+    profile = PersonalityProfile(
+        birthdate=birthdate,
+        blood_type=blood_type,
+        animal_type=animal_type,
+    )
+    seed_result = profile.generate_seed()
+    personality_profiles[profile.id] = profile
+    return {"status": "created", "profile": seed_result}
+
+@app.get("/personality/profile/{profile_id}", tags=["personality-vector"])
+async def personality_get(profile_id: str, _=Depends(verify_api_key)):
+    """人格プロファイル取得"""
+    profile = personality_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile.to_dict()
+
+@app.get("/personality/animals", tags=["personality-vector"])
+async def personality_animals(_=Depends(verify_api_key)):
+    """動物アーキタイプ一覧"""
+    return {"animals": list_animals()}
+
+@app.get("/personality/questions", tags=["personality-vector"])
+async def personality_questions(count: int = None, _=Depends(verify_api_key)):
+    """簡易質問リスト取得"""
+    return {"questions": get_questions(count)}
+
+@app.post("/personality/questions/apply/{profile_id}", tags=["personality-vector"])
+async def personality_apply_answers(profile_id: str, request: Request,
+                                     _=Depends(verify_api_key)):
+    """質問回答からプロファイルを補正"""
+    profile = personality_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    body = await request.json()
+    answers = body.get("answers", {})
+    modifiers = apply_answers(answers)
+    result = profile.apply_question_modifiers(modifiers)
+    return {"status": "applied", "result": result,
+            "updated_profile": profile.to_dict()}
+
+@app.post("/personality/learn/{profile_id}", tags=["personality-vector"])
+async def personality_learn(profile_id: str, request: Request,
+                             _=Depends(verify_api_key)):
+    """フィードバックから人格を学習"""
+    profile = personality_profiles.get(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    body = await request.json()
+    feedback_type = body.get("feedback_type", "neutral")
+    traits = body.get("traits", {})
+    record = personality_learning_engine.learn_from_feedback(
+        profile.vector, feedback_type, traits
+    )
+    return {"status": "learned", "record": record}
+
+@app.get("/personality/learning/stats", tags=["personality-vector"])
+async def personality_learning_stats(_=Depends(verify_api_key)):
+    """学習統計"""
+    return personality_learning_engine.get_stats()
+
+# ============================================================
+# 相性診断エンジン
+# ============================================================
+
+@app.post("/compatibility/check", tags=["compatibility"])
+async def compatibility_check(request: Request, _=Depends(verify_api_key)):
+    """2つの人格ベクトル間の相性をチェック"""
+    body = await request.json()
+    profile_a_id = body.get("profile_a_id")
+    profile_b_id = body.get("profile_b_id")
+    relationship_type = body.get("relationship_type", "general")
+
+    # プロファイルIDが指定された場合はストアから取得
+    if profile_a_id and profile_b_id:
+        profile_a = personality_profiles.get(profile_a_id)
+        profile_b = personality_profiles.get(profile_b_id)
+        if not profile_a or not profile_b:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        vec_a = profile_a.vector
+        vec_b = profile_b.vector
+    else:
+        # 直接ベクトルが渡された場合
+        vec_a = PersonalityVector(body.get("vector_a", {}))
+        vec_b = PersonalityVector(body.get("vector_b", {}))
+
+    result = compat_engine.check(vec_a, vec_b, relationship_type)
+    return result
+
+@app.post("/compatibility/report", tags=["compatibility"])
+async def compatibility_report(request: Request, _=Depends(verify_api_key)):
+    """相性レポートを生成"""
+    body = await request.json()
+    vec_a = PersonalityVector(body.get("vector_a", {}))
+    vec_b = PersonalityVector(body.get("vector_b", {}))
+    relationship_type = body.get("relationship_type", "general")
+
+    result = compat_engine.check(vec_a, vec_b, relationship_type)
+    report = compat_engine.get_report(result)
+    return report

@@ -341,6 +341,36 @@ server_module.i18n.get_message = MagicMock(return_value="こんにちは！")
 # D-4: WebSocket
 server_module.ws_connections = []
 
+# 人格ベクトル32次元 + 相性エンジン
+server_module.personality_profiles = {}
+server_module.personality_learning_engine = MagicMock()
+server_module.personality_learning_engine.learn_from_feedback = MagicMock(return_value={
+    "timestamp": "2026-01-01T00:00:00", "feedback_type": "positive",
+    "changes": {"creativity": {"old": 0.5, "new": 0.52, "delta": 0.02}},
+    "traits_affected": 1,
+})
+server_module.personality_learning_engine.get_stats = MagicMock(return_value={
+    "total_updates": 0, "learning_rate": 0.02, "decay_rate": 0.98,
+})
+server_module.compat_engine = MagicMock()
+server_module.compat_engine.check = MagicMock(return_value={
+    "compatibility_score": 0.75,
+    "relationship_type": "general",
+    "level": {"level_id": "strong_match", "label": "強いマッチ"},
+    "components": {
+        "similarity": {"score": 0.8, "weight": 0.35, "weighted": 0.28},
+        "balance": {"score": 0.7, "weight": 0.25, "weighted": 0.175},
+        "value_alignment": {"score": 0.75, "weight": 0.25, "weighted": 0.1875},
+        "behavior_fit": {"score": 0.7, "weight": 0.15, "weighted": 0.105},
+    },
+    "interaction_strategy": {"style": "collaborative"},
+})
+server_module.compat_engine.get_report = MagicMock(return_value={
+    "summary": "相性スコア: 75.0% (強いマッチ)",
+    "score": 0.75,
+    "recommendation": "良い相性です。",
+})
+
 # === httpx の AsyncClient を使用 ===
 from httpx import AsyncClient, ASGITransport
 
@@ -1094,3 +1124,80 @@ class TestI18nE2E:
         data = r.json()
         assert "message" in data
         assert "key" in data
+
+
+# ============================================================
+# 人格ベクトル 32次元 + 相性 E2E
+# ============================================================
+
+class TestPersonalityVectorE2E:
+    """人格ベクトル32次元 E2Eテスト"""
+
+    @pytest.mark.asyncio
+    async def test_personality_init(self, client):
+        """人格プロファイル生成"""
+        r = await client.post("/personality/init", json={
+            "birthdate": "1990-07-15",
+            "blood_type": "A",
+            "animal_type": "wolf",
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "created"
+        assert "profile" in data
+
+    @pytest.mark.asyncio
+    async def test_personality_animals(self, client):
+        """動物アーキタイプ一覧"""
+        r = await client.get("/personality/animals")
+        assert r.status_code == 200
+        data = r.json()
+        assert "animals" in data
+        assert len(data["animals"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_personality_questions(self, client):
+        """簡易質問リスト取得"""
+        r = await client.get("/personality/questions")
+        assert r.status_code == 200
+        data = r.json()
+        assert "questions" in data
+        assert len(data["questions"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_personality_learning_stats(self, client):
+        """学習統計"""
+        r = await client.get("/personality/learning/stats")
+        assert r.status_code == 200
+        data = r.json()
+        assert "total_updates" in data
+        assert "learning_rate" in data
+
+
+class TestCompatibilityE2E:
+    """相性診断 E2Eテスト"""
+
+    @pytest.mark.asyncio
+    async def test_compatibility_check(self, client):
+        """相性チェック"""
+        r = await client.post("/compatibility/check", json={
+            "vector_a": {"logic": 0.8, "empathy": 0.3},
+            "vector_b": {"logic": 0.4, "empathy": 0.9},
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert "compatibility_score" in data
+        assert "level" in data
+
+    @pytest.mark.asyncio
+    async def test_compatibility_report(self, client):
+        """相性レポート生成"""
+        r = await client.post("/compatibility/report", json={
+            "vector_a": {"logic": 0.8, "creativity": 0.6},
+            "vector_b": {"logic": 0.6, "creativity": 0.8},
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert "summary" in data
+        assert "score" in data
+        assert "recommendation" in data

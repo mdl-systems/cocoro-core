@@ -293,3 +293,317 @@ class TestLINEBridge:
         status = bridge.get_status()
         assert status["platform"] == "line"
         assert status["configured"] is False
+
+
+# ===================== PersonalityVector 32次元 =====================
+
+class TestPersonalityVector:
+    def test_default_values(self):
+        from personality.personality_vector import PersonalityVector, ALL_PARAMS
+        vec = PersonalityVector()
+        assert len(ALL_PARAMS) == 32
+        for p in ALL_PARAMS:
+            assert vec.get(p) == 0.5
+
+    def test_set_and_get(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector()
+        vec.set("logic", 0.8)
+        assert vec.get("logic") == 0.8
+
+    def test_clamp(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector()
+        vec.set("logic", 1.5)
+        assert vec.get("logic") == 1.0
+        vec.set("logic", -0.3)
+        assert vec.get("logic") == 0.0
+
+    def test_adjust(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector()
+        new_val = vec.adjust("logic", 0.2)
+        assert abs(new_val - 0.7) < 0.001
+
+    def test_distance(self):
+        from personality.personality_vector import PersonalityVector
+        vec_a = PersonalityVector()
+        vec_b = PersonalityVector({"logic": 1.0, "empathy": 0.0})
+        dist = vec_a.distance(vec_b)
+        assert dist > 0
+
+    def test_similarity(self):
+        from personality.personality_vector import PersonalityVector
+        vec_a = PersonalityVector()
+        vec_b = PersonalityVector()
+        assert vec_a.similarity(vec_b) == 1.0
+
+    def test_to_categorized_dict(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector()
+        cats = vec.to_categorized_dict()
+        assert "thinking" in cats
+        assert "emotion" in cats
+        assert len(cats) == 8
+
+    def test_dominant_traits(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector({"logic": 0.95, "empathy": 0.9})
+        top = vec.dominant_traits(2)
+        assert top[0][0] == "logic"
+        assert top[0][1] == 0.95
+
+    def test_category_averages(self):
+        from personality.personality_vector import PersonalityVector
+        vec = PersonalityVector()
+        avgs = vec.category_averages()
+        assert avgs["thinking"] == 0.5
+        assert len(avgs) == 8
+
+    def test_from_dict(self):
+        from personality.personality_vector import PersonalityVector
+        data = {"logic": 0.8, "empathy": 0.3}
+        vec = PersonalityVector.from_dict(data)
+        assert vec.get("logic") == 0.8
+        assert vec.get("empathy") == 0.3
+        assert vec.get("creativity") == 0.5
+
+
+class TestZodiacTraits:
+    def test_determine_zodiac(self):
+        from personality.zodiac_traits import determine_zodiac
+        assert determine_zodiac(7, 15) == "cancer"
+        assert determine_zodiac(3, 25) == "aries"
+        assert determine_zodiac(12, 25) == "capricorn"
+        assert determine_zodiac(1, 15) == "capricorn"
+
+    def test_get_zodiac_modifiers(self):
+        from personality.zodiac_traits import get_zodiac_modifiers
+        mods = get_zodiac_modifiers("cancer")
+        assert "empathy" in mods
+        assert mods["empathy"] > 0
+
+    def test_get_zodiac_element(self):
+        from personality.zodiac_traits import get_zodiac_element
+        assert get_zodiac_element("aries") == "fire"
+        assert get_zodiac_element("taurus") == "earth"
+        assert get_zodiac_element("gemini") == "air"
+        assert get_zodiac_element("cancer") == "water"
+
+
+class TestAnimalPersonality:
+    def test_list_animals(self):
+        from personality.animal_personality import list_animals
+        animals = list_animals()
+        assert len(animals) == 12
+        names = [a["id"] for a in animals]
+        assert "lion" in names
+        assert "wolf" in names
+
+    def test_get_modifiers(self):
+        from personality.animal_personality import get_animal_modifiers
+        mods = get_animal_modifiers("lion")
+        assert mods["leadership"] == 0.30
+        assert mods["assertiveness"] == 0.20
+
+    def test_get_archetype(self):
+        from personality.animal_personality import get_animal_archetype
+        arch = get_animal_archetype("wolf")
+        assert arch["name"] == "オオカミ"
+        assert "modifiers" in arch
+
+
+class TestBloodTraits:
+    def test_get_modifiers(self):
+        from personality.blood_traits import get_blood_modifiers
+        mods = get_blood_modifiers("A")
+        assert "discipline" in mods
+        assert mods["discipline"] > 0
+
+    def test_validate(self):
+        from personality.blood_traits import validate_blood_type
+        assert validate_blood_type("A") is True
+        assert validate_blood_type("AB") is True
+        assert validate_blood_type("X") is False
+
+
+class TestQuickQuestions:
+    def test_get_questions(self):
+        from personality.quick_questions import get_questions
+        qs = get_questions()
+        assert len(qs) == 8
+
+    def test_get_limited(self):
+        from personality.quick_questions import get_questions
+        qs = get_questions(3)
+        assert len(qs) == 3
+
+    def test_apply_answers(self):
+        from personality.quick_questions import apply_answers
+        mods = apply_answers({"q1": 0, "q2": 1})
+        assert "adventure" in mods or "cooperation" in mods
+        assert len(mods) > 0
+
+
+class TestPersonalityLearning:
+    def test_learn_from_feedback(self):
+        from personality.personality_vector import PersonalityVector
+        from personality.personality_learning import PersonalityLearning
+        vec = PersonalityVector()
+        learner = PersonalityLearning()
+        record = learner.learn_from_feedback(vec, "positive", {"creativity": 0.8})
+        assert "creativity" in record["changes"]
+        assert record["changes"]["creativity"]["new"] > 0.5
+
+    def test_apply_decay(self):
+        from personality.personality_vector import PersonalityVector
+        from personality.personality_learning import PersonalityLearning
+        vec = PersonalityVector({"logic": 0.9, "empathy": 0.1})
+        learner = PersonalityLearning()
+        result = learner.apply_decay(vec)
+        # Should move toward center (0.5)
+        assert vec.get("logic") < 0.9
+        assert vec.get("empathy") > 0.1
+
+    def test_get_stats(self):
+        from personality.personality_learning import PersonalityLearning
+        learner = PersonalityLearning()
+        stats = learner.get_stats()
+        assert stats["total_updates"] == 0
+        assert stats["learning_rate"] == 0.02
+
+
+class TestPersonalityProfile:
+    def test_generate_seed(self):
+        from datetime import date
+        from personality.models.personality_profile import PersonalityProfile
+        profile = PersonalityProfile(
+            birthdate=date(1990, 7, 15),
+            blood_type="A",
+            animal_type="wolf",
+        )
+        result = profile.generate_seed()
+        assert result["zodiac_sign"] == "cancer"
+        assert result["animal_type"] == "wolf"
+        assert result["blood_type"] == "A"
+        assert "vector" in result
+
+    def test_to_dict(self):
+        from datetime import date
+        from personality.models.personality_profile import PersonalityProfile
+        profile = PersonalityProfile(
+            birthdate=date(1990, 7, 15),
+            blood_type="O",
+            animal_type="lion",
+        )
+        profile.generate_seed()
+        d = profile.to_dict()
+        assert d["zodiac_sign"] == "cancer"
+        assert d["blood_type"] == "O"
+        assert "personality_vector" in d
+        assert "dominant_traits" in d
+        assert len(d["personality_vector"]) == 32
+
+    def test_from_dict(self):
+        from datetime import date
+        from personality.models.personality_profile import PersonalityProfile
+        data = {
+            "birthdate": "1990-07-15",
+            "blood_type": "B",
+            "animal_type": "cat",
+            "personality_vector": {"creativity": 0.8},
+        }
+        profile = PersonalityProfile.from_dict(data)
+        assert profile.blood_type == "B"
+        assert profile.vector.get("creativity") == 0.8
+
+
+# ===================== Compatibility Engine =====================
+
+class TestCompatibilityEngine:
+    def test_check_identical(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.compatibility_engine import CompatibilityEngine
+        vec_a = PersonalityVector()
+        vec_b = PersonalityVector()
+        engine = CompatibilityEngine()
+        result = engine.check(vec_a, vec_b)
+        assert result["compatibility_score"] > 0.5
+        assert "level" in result
+        assert "components" in result
+
+    def test_check_different(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.compatibility_engine import CompatibilityEngine
+        vec_a = PersonalityVector({"logic": 1.0, "empathy": 0.0, "speed": 1.0})
+        vec_b = PersonalityVector({"logic": 0.0, "empathy": 1.0, "speed": 0.0})
+        engine = CompatibilityEngine()
+        result = engine.check(vec_a, vec_b)
+        assert "compatibility_score" in result
+
+    def test_level_determination(self):
+        from compatibility.compatibility_engine import CompatibilityEngine
+        engine = CompatibilityEngine()
+        level = engine._determine_level(0.9)
+        assert level["level_id"] == "ideal_partner"
+        level = engine._determine_level(0.75)
+        assert level["level_id"] == "strong_match"
+        level = engine._determine_level(0.4)
+        assert level["level_id"] == "challenging"
+
+    def test_report(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.compatibility_engine import CompatibilityEngine
+        vec_a = PersonalityVector()
+        vec_b = PersonalityVector()
+        engine = CompatibilityEngine()
+        result = engine.check(vec_a, vec_b)
+        report = engine.get_report(result)
+        assert "summary" in report
+        assert "score" in report
+        assert "recommendation" in report
+
+    def test_relationship_type(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.compatibility_engine import CompatibilityEngine
+        vec_a = PersonalityVector()
+        vec_b = PersonalityVector()
+        engine = CompatibilityEngine()
+        result = engine.check(vec_a, vec_b, "human-ai")
+        assert result["relationship_type"] == "human-ai"
+
+
+class TestSimilarityCalculator:
+    def test_identical(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.similarity_calculator import calculate_similarity
+        vec = PersonalityVector()
+        result = calculate_similarity(vec, vec)
+        assert result["similarity"] == 1.0
+
+    def test_different(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.similarity_calculator import calculate_similarity
+        vec_a = PersonalityVector({"logic": 1.0})
+        vec_b = PersonalityVector({"logic": 0.0})
+        result = calculate_similarity(vec_a, vec_b)
+        assert result["similarity"] < 1.0
+
+
+class TestValueAlignment:
+    def test_aligned(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.value_alignment import calculate_value_alignment
+        vec = PersonalityVector()
+        result = calculate_value_alignment(vec, vec)
+        assert result["value_alignment"] == 1.0
+        assert result["fully_aligned"] is True
+
+    def test_misaligned(self):
+        from personality.personality_vector import PersonalityVector
+        from compatibility.value_alignment import calculate_value_alignment
+        vec_a = PersonalityVector({"ethics": 1.0, "fairness": 0.0})
+        vec_b = PersonalityVector({"ethics": 0.0, "fairness": 1.0})
+        result = calculate_value_alignment(vec_a, vec_b)
+        assert result["value_alignment"] < 1.0
+        assert len(result["conflict_areas"]) > 0
