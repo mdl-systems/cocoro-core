@@ -70,6 +70,11 @@ class MockPersonality:
     values = MagicMock()
     beliefs = MagicMock()
     goals = MagicMock()
+    goals.get_all = AsyncMock(return_value=[{"id": 1, "title": "test", "status": "active"}])
+    goals.add = AsyncMock(return_value={"id": 2, "title": "new", "status": "active"})
+    goals.get_active = AsyncMock(return_value=[{"id": 1, "title": "test", "status": "active"}])
+    goals.update = AsyncMock(return_value={"id": 1, "status": "updated"})
+    goals.delete = AsyncMock(return_value=True)
     
     def build_system_prompt(self): return "You are AI."
     def get_creative_friction(self, sync_rate): return ""
