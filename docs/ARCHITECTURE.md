@@ -3,7 +3,7 @@
 > AI に「人格」を持たせるOS。LLMは「声帯」に過ぎない。  
 > 人格の一貫性は Memory + Values + Emotion + Decision Graph で保証する。
 
-**Stats:** 52 modules / 121+ API endpoints / 24 DB tables / 133 tests
+**Stats:** 53 modules / 131 API endpoints / 24 DB tables / 231 tests (9 test files)
 
 ---
 
@@ -16,6 +16,8 @@
 │  │Dashboard UI  │  │Voice         │                            │
 │  │(/dashboard)  │  │Interface     │                            │
 │  │リアルタイム   │  │(Web Speech   │                            │
+
+
 │  │全機能可視化   │  │ API連携)     │                            │
 │  └──────────────┘  └──────────────┘                            │
 ├─────────────────────────────────────────────────────────────────┤
@@ -28,7 +30,19 @@
 │  │           │  POST /boot/*   POST /test/*    GET  /decide/... │
 │  │           │  GET  /plugins  POST /voice/*   GET  /llm/*      │
 │  │           │  POST /users/*  POST /comm/*    GET  /dashboard  │
-│  └─────┬────┘  121+ endpoints                                  │
+│  │           │  GET  /security/status          GET /governance/* │
+│  └─────┬────┘  131 endpoints                                   │
+├────────┼────────────────────────────────────────────────────────┤
+│ Layer 9.5: Security Middleware (D-10)                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
+│  │Rate Limiter  │  │IP Filter     │  │Login Throttle│         │
+│  │(Token Bucket)│  │(White/Black) │  │(Brute Force) │         │
+│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  ┌──────────────┐  ┌──────────────┐                            │
+│  │Security      │  │HTTPS         │  Security Headers:         │
+│  │Headers       │  │Enforcement   │  X-Content-Type-Options     │
+│  │(6ヘッダー)    │  │(HSTS)        │  X-Frame-Options, X-XSS    │
+│  └──────────────┘  └──────────────┘  Referrer-Policy, Perms    │
 ├────────┼────────────────────────────────────────────────────────┤
 │ Layer 9: Governance (倫理・安全)                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
@@ -133,9 +147,9 @@
 │  │  vector  │  │  Queue)  │  │              │                │
 │  └──────────┘  └──────────┘  └──────────────┘                │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐                │
-│  │Migration │  │CORS      │  │Structured    │                │
-│  │Runner    │  │Middleware │  │JSON Logging  │                │
-│  │(A-5)     │  │(A-4)     │  │(A-6)         │                │
+│  │Migration │  │CORS +    │  │Structured    │                │
+│  │Runner    │  │Security  │  │JSON Logging  │                │
+│  │(A-5)     │  │Middleware│  │(A-6)         │                │
 │  └──────────┘  └──────────┘  └──────────────┘                │
 ├─────────────────────────────────────────────────────────────────┤
 │ Layer 1: OS       (Debian 13)                                   │
@@ -531,9 +545,10 @@ A-6: Structured Logging
 ## Directory Structure
 
 ```
-cocoro-core/                        52 modules
+cocoro-core/                        53 modules
 ├── api/
-│   ├── server.py                   # FastAPI メインサーバー (121+ endpoints)
+│   ├── server.py                   # FastAPI メインサーバー (131 endpoints)
+│   ├── security.py                 # セキュリティミドルウェア (D-10)
 │   └── static/
 │       └── dashboard.html          # ダッシュボードUI (C-1)
 ├── brain/
@@ -600,14 +615,16 @@ cocoro-core/                        52 modules
 │       ├── docker-compose.yml
 │       ├── init.sql                # DB初期化 (24テーブル)
 │       └── nginx.conf
-├── tests/                          # 133テスト (6ファイル)
+├── tests/                          # 231テスト (9ファイル)
 │   ├── test_agent.py               # TaskRouter (13)
 │   ├── test_brain.py               # Planner + Decision + Reasoning + LLM (14)
+│   ├── test_e2e.py                 # E2E APIテスト D-1 (99: 全APIカテゴリ)
 │   ├── test_emotion.py             # EmotionState + EmotionEngine (28)
 │   ├── test_growth.py              # cosine_sim + gradient + learning_rate (18)
 │   ├── test_memory.py              # Consolidation parser (4)
 │   ├── test_next_gen.py            # C-2〜C-8 全テスト (42)
-│   └── test_personality.py         # PersonalityEngine + Observation (14)
+│   ├── test_personality.py         # PersonalityEngine + Observation (14)
+│   └── test_security.py            # Security D-10 (19: RateLimiter/IPFilter/LoginThrottle)
 ├── docs/
 │   └── ARCHITECTURE.md             # このファイル
 └── requirements.txt
@@ -615,7 +632,7 @@ cocoro-core/                        52 modules
 
 ---
 
-## API Endpoints (121+ total)
+## API Endpoints (131 total)
 
 ### Core
 | Method | Path | Description |
@@ -729,9 +746,15 @@ cocoro-core/                        52 modules
 ### Governance
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/governance/check` | 倫理チェック |
-| `POST` | `/governance/modify` | 変更許可チェック |
-| `GET` | `/governance/report` | ガバナンスレポート |
+| `POST` | `/governance/check` | 倒理チェック |
+| `GET` | `/governance/report` | ガバナンス総合レポート |
+| `GET` | `/governance/log` | ガバナンスログ履歴 |
+
+### Security (D-10)
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/security/status` | セキュリティ状況一覧 |
+| `POST` | `/auth/token` | JWTトークン発行 (Login Throttle統合) |
 
 ### Plugins (C-5)
 | Method | Path | Description |
@@ -871,7 +894,7 @@ float精度: 全API出力を round(x, 3) で正規化
 | Cache/Queue | Redis | 7 |
 | Container | Docker Compose | - |
 | Reverse Proxy | Nginx | - |
-| Test | pytest + pytest-asyncio | 133 tests |
+| Test | pytest + pytest-asyncio | 231 tests (9 files) |
 | Voice | Web Speech API | Browser |
 
 ---
@@ -900,3 +923,103 @@ float精度: 全API出力を round(x, 3) で正規化
 | C-6 | Emotion Behavior Adapter (感情→行動適応) | ✅ Complete |
 | C-7 | Memory Archiver (長期記憶自動整理) | ✅ Complete |
 | C-8 | Voice Interface (音声インターフェース) | ✅ Complete |
+| D-1 | E2E Tests (99 API統合テスト) | ✅ Complete |
+| D-10 | Security (Rate Limit / IP Filter / Login Throttle / Headers) | ✅ Complete |
+
+---
+
+## Security Architecture (D-10)
+
+```
+Security Middleware (全リクエストに適用):
+  1. IP Filter       — ホワイトリスト/ブラックリスト
+  2. Rate Limiter    — Token Bucket (パス別レート制御)
+  3. Login Throttle  — 認証失敗カウント + IPロックアウト
+  4. Security Headers— 6ヘッダー自動付与
+  5. HTTPS Enforce   — HTTP→HTTPSリダイレクト + HSTS
+
+Rate Limit 設定:
+  /auth/*     → 10回/100秒  (ブルートフォース防止)
+  /chat       → 30回/60秒   (会話保護)
+  その他      → 120回/60秒
+
+Login Throttle:
+  デフォルト: 10回失敗で300秒ロックアウト
+  認証成功でカウンターリセット
+
+環境変数:
+  IP_WHITELIST            カンマ区切り。空=全IP許可
+  IP_BLACKLIST            カンマ区切り。ブラックリスト優先
+  FORCE_HTTPS             true/false
+  RATE_LIMIT_ENABLED      true/false
+  LOGIN_MAX_FAILURES      デフォルト 10
+  LOGIN_LOCKOUT_SECONDS   デフォルト 300
+```
+
+---
+
+## PersonalityVector — 8次元人格ベクトル
+
+```
+8D PersonalityVector (v3.5/v4 準拠):
+  honesty        █████████ 0.9  core       誠実であること
+  efficiency     ███████   0.7  work       効率を重視すること
+  growth         ████████  0.8  core       継続的に成長すること
+  empathy        ██████    0.6  social     共感を持って接すること
+  logic          ████████  0.8  thinking   論理的に判断すること
+  courage        ████      0.4  core       リスクを恐れないこと
+  risk_tolerance █████     0.5  decision   不確実性を受け入れる力
+  curiosity      ███████   0.7  thinking   未知への探究心と学習意欲
+
+シンクロ率 = cos_sim(current_8D, ideal_8D) × 100
+勾配降下法で理想ベクトルに漸近 (イエスマン防止: 92%で停止)
+```
+
+---
+
+## Governance Layer
+
+```
+GovernanceManager (統合管理):
+  ├── EthicsEngine       harm/law/value 3段階チェック
+  │     ・有害キーワード検出 (11パターン)
+  │     ・機密トピック検出 (4パターン)
+  │     ・リスクレベル: safe/caution/warning/blocked
+  ├── SafetyMonitor      自己改変・急変検知
+  │     ・価値観変更幅 ≤ 0.10/step
+  │     ・感情変動幅 ≤ 0.30/step
+  │     ・過度な変更は自動ブロック
+  └── AlignmentEngine    オーナー整合性監視
+        ・シンクロ率 < 50% → warning (乖離)
+        ・シンクロ率 > 92% → caution (イエスマンリスク)
+        ・ログ: governance_log テーブルに全記録
+```
+
+---
+
+## Testing Strategy
+
+```
+231 Tests / 9 Files / 1.42s
+
+ユニットテスト (132):
+  test_agent.py       ── TaskRouterルーティング (13)
+  test_brain.py       ── Planner/Decision/Reasoning/LLM (14)
+  test_emotion.py     ── EmotionState/EmotionEngine (28)
+  test_growth.py      ── cosine_sim/gradient/learning_rate (18)
+  test_memory.py      ── Consolidation parser (4)
+  test_next_gen.py    ── Plugin/MultiUser/PeerComm/Voice/LLM (42)
+  test_personality.py ── PersonalityEngine/SelfObservation (14)
+
+E2Eテスト (99):
+  test_e2e.py         ── 全APIカテゴリ統合テスト (D-1)
+    Health/Dashboard/Decision/Emotion/Growth/Evolution/
+    Personality/Cognitive/Clone/Migration/Plugins/LLM/
+    MultiUser/PeerComm/Voice/Org/Memory/ValueScoring/
+    Intelligence/Safety/Queue/Auth/Error/Goals/Governance/Security
+
+セキュリティテスト (19):
+  test_security.py    ── RateLimiter/LoginThrottle/IPFilter (D-10)
+
+全テストはDocker内で実行: pytest tests/ -v --tb=short
+```
