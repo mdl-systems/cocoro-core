@@ -258,6 +258,13 @@ async def lifespan(app: FastAPI):
             _observation_report_scheduler(observe_interval)))
         logger.info(f"Scheduler: observation report every {observe_interval}h")
 
+    # メモリアーカイブ（24時間ごと）
+    archive_interval = int(os.getenv("MEMORY_ARCHIVE_INTERVAL_HOURS", "24"))
+    if archive_interval > 0:
+        scheduler_tasks.append(asyncio.create_task(
+            _memory_archive_scheduler(archive_interval)))
+        logger.info(f"Scheduler: memory archive every {archive_interval}h")
+
     logger.info("=== cocoro-core started ===")
     yield
     await event_bus.stop()
@@ -276,6 +283,7 @@ async def _consolidation_scheduler(interval_hours: int):
             logger.info("[Scheduler] Consolidation starting...")
             result = await consolidation.consolidate()
             logger.info(f"[Scheduler] Consolidation done: {result.get('status', 'unknown')}")
+            _update_scheduler_state("consolidation", result.get("status", "unknown"))
             await webhook.notify_consolidation(result)
         except asyncio.CancelledError:
             break
@@ -295,6 +303,7 @@ async def _emotion_decay_scheduler(interval_hours: int):
                 personality.emotion.decay()
                 new_state = personality.emotion.get_state()
                 logger.info(f"[Scheduler] Emotion decay: {state.dominant}({state.intensity:.2f}) → {new_state.dominant}({new_state.intensity:.2f})")
+                _update_scheduler_state("emotion_decay", f"{state.dominant}→{new_state.dominant}")
                 await webhook.notify("emotion_decay", {
                     "summary": f"感情自然減衰: {state.dominant} → {new_state.dominant}",
                     "before_intensity": round(state.intensity, 3),
@@ -315,6 +324,7 @@ async def _sync_rate_scheduler(interval_hours: int):
             sync_data = await growth.calculate_sync_rate()
             await growth.record_sync_rate(sync_data.get("sync_rate", 0))
             logger.info(f"[Scheduler] Sync rate recorded: {sync_data.get('sync_rate', 0):.1f}%")
+            _update_scheduler_state("sync_rate", f"{sync_data.get('sync_rate', 0):.1f}%")
             await webhook.notify("sync_rate", {
                 "summary": f"シンクロ率記録: {sync_data.get('sync_rate', 0):.1f}%",
                 "sync_rate": sync_data.get("sync_rate", 0),
@@ -340,11 +350,32 @@ async def _observation_report_scheduler(interval_hours: int):
                     "by_type": stats.get("by_type", {}),
                 })
                 logger.info(f"[Scheduler] Observation report sent: {total} observations")
+                _update_scheduler_state("observation", f"{total} observations")
         except asyncio.CancelledError:
             break
         except Exception as e:
             logger.error(f"[Scheduler] Observation report failed: {e}")
 
+
+async def _memory_archive_scheduler(interval_hours: int):
+    """定期的に古い記憶を自動アーカイブ"""
+    await asyncio.sleep(600)  # 起動10分後から
+    while True:
+        try:
+            await asyncio.sleep(interval_hours * 3600)
+            logger.info("[Scheduler] Memory archive starting...")
+            result = await memory_archiver.run_full_archive()
+            archived = result.get("archived", 0) if isinstance(result, dict) else 0
+            logger.info(f"[Scheduler] Memory archive done: {archived} records archived")
+            _update_scheduler_state("memory_archive", f"{archived} archived")
+            await webhook.notify("memory_archive", {
+                "summary": f"メモリアーカイブ完了: {archived}件整理",
+                "archived": archived,
+            })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[Scheduler] Memory archive failed: {e}")
 
 app = FastAPI(title="cocoro-core", version="1.0.0",
               description="Personality AI Operating System", lifespan=lifespan)
@@ -519,6 +550,66 @@ async def security_status(_=Depends(verify_api_key)):
         "login_throttle": login_throttle.get_stats(),
         "auth_mode": "jwt+apikey" if settings.JWT_SECRET else ("apikey" if settings.COCORO_API_KEY else "open"),
     }
+
+
+# === D-5: Scheduler Management API ===
+_scheduler_state = {
+    "consolidation": {"last_run": None, "next_run": None, "run_count": 0, "last_status": None,
+                      "interval_hours": int(os.getenv("CONSOLIDATION_INTERVAL_HOURS", "6"))},
+    "emotion_decay": {"last_run": None, "next_run": None, "run_count": 0, "last_status": None,
+                      "interval_hours": int(os.getenv("EMOTION_DECAY_INTERVAL_HOURS", "1"))},
+    "sync_rate": {"last_run": None, "next_run": None, "run_count": 0, "last_status": None,
+                  "interval_hours": int(os.getenv("SYNC_RECORD_INTERVAL_HOURS", "12"))},
+    "observation": {"last_run": None, "next_run": None, "run_count": 0, "last_status": None,
+                    "interval_hours": int(os.getenv("OBSERVATION_REPORT_INTERVAL_HOURS", "24"))},
+    "memory_archive": {"last_run": None, "next_run": None, "run_count": 0, "last_status": None,
+                       "interval_hours": int(os.getenv("MEMORY_ARCHIVE_INTERVAL_HOURS", "24"))},
+}
+
+
+def _update_scheduler_state(name: str, status: str):
+    """スケジューラー実行記録を更新"""
+    from datetime import datetime, timezone, timedelta
+    JST = timezone(timedelta(hours=9))
+    now = datetime.now(JST)
+    _scheduler_state[name]["last_run"] = now.isoformat()
+    _scheduler_state[name]["run_count"] += 1
+    _scheduler_state[name]["last_status"] = status
+    interval = _scheduler_state[name]["interval_hours"]
+    _scheduler_state[name]["next_run"] = (now + timedelta(hours=interval)).isoformat()
+
+
+@app.get("/scheduler/status")
+async def scheduler_status(_=Depends(verify_api_key)):
+    """全スケジューラーの稼働状況"""
+    return {
+        "schedulers": _scheduler_state,
+        "total_active": sum(1 for s in _scheduler_state.values() if s["interval_hours"] > 0),
+    }
+
+
+@app.post("/scheduler/trigger/{name}")
+async def scheduler_trigger(name: str, _=Depends(verify_api_key)):
+    """スケジューラーを手動トリガー"""
+    if name == "consolidation":
+        result = await consolidation.consolidate()
+        _update_scheduler_state("consolidation", result.get("status", "unknown"))
+        return {"triggered": "consolidation", "result": result}
+    elif name == "emotion_decay":
+        personality.emotion.decay()
+        _update_scheduler_state("emotion_decay", "decayed")
+        return {"triggered": "emotion_decay", "status": "decayed"}
+    elif name == "sync_rate":
+        sync = await growth.calculate_sync_rate()
+        await growth.record_sync_rate(sync.get("sync_rate", 0))
+        _update_scheduler_state("sync_rate", f"{sync.get('sync_rate', 0):.1f}%")
+        return {"triggered": "sync_rate", "sync_rate": sync}
+    elif name == "memory_archive":
+        result = await memory_archiver.run_full_archive()
+        _update_scheduler_state("memory_archive", "archived")
+        return {"triggered": "memory_archive", "result": result}
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown scheduler: {name}")
 
 
 

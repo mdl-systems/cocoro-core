@@ -781,7 +781,37 @@ class TestGovernanceE2E:
         assert "risk_level" in data
 
 
-# === D-10: Security Tests ===
+# === D-5: Scheduler Management Tests ===
+class TestSchedulerE2E:
+    @pytest.mark.asyncio
+    async def test_scheduler_status(self, client):
+        """全スケジューラーの稼働状況取得"""
+        r = await client.get("/scheduler/status")
+        assert r.status_code == 200
+        data = r.json()
+        assert "schedulers" in data
+        assert "total_active" in data
+        assert "consolidation" in data["schedulers"]
+        assert "emotion_decay" in data["schedulers"]
+        assert "sync_rate" in data["schedulers"]
+        assert "observation" in data["schedulers"]
+        assert "memory_archive" in data["schedulers"]
+
+    @pytest.mark.asyncio
+    async def test_scheduler_trigger_emotion_decay(self, client):
+        """感情減衰を手動トリガー"""
+        r = await client.post("/scheduler/trigger/emotion_decay")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["triggered"] == "emotion_decay"
+
+    @pytest.mark.asyncio
+    async def test_scheduler_trigger_unknown(self, client):
+        """存在しないスケジューラーはエラー"""
+        r = await client.post("/scheduler/trigger/unknown_scheduler")
+        assert r.status_code == 404
+
+
 class TestSecurityE2E:
     @pytest.mark.asyncio
     async def test_security_status(self, client):
