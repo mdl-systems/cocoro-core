@@ -1212,12 +1212,12 @@ async def add_knowledge(req: KnowledgeReq, _=Depends(verify_api_key)):
 @app.get("/intelligence/knowledge/search")
 async def search_knowledge(query: str, limit: int = 10, _=Depends(verify_api_key)):
     """知識検索"""
-    return {"results": await intelligence.search_knowledge(query, limit)}
+    return {"results": intelligence.search_knowledge(query, limit)}
 
 @app.get("/intelligence/skills")
 async def get_skills(category: str = "", _=Depends(verify_api_key)):
     """スキル一覧"""
-    return {"skills": await intelligence.get_skills(category or None)}
+    return {"skills": intelligence.get_skills(category or None)}
 
 class SkillReq(BaseModel):
     name: str
@@ -1359,34 +1359,34 @@ async def migrate_run(_=Depends(verify_api_key)):
 @app.get("/emotion/adaptation")
 async def emotion_adaptation(_=Depends(verify_api_key)):
     """現在の感情に基づく行動適応パラメータ"""
-    return await emotion_adapter.get_full_adaptation()
+    return emotion_adapter.get_full_adaptation()
 
 @app.get("/emotion/decision-threshold")
 async def emotion_decision_threshold(_=Depends(verify_api_key)):
     """感情に基づく判断閾値"""
-    return await emotion_adapter.get_decision_threshold()
+    return emotion_adapter.get_decision_threshold()
 
 @app.get("/emotion/response-modifiers")
 async def emotion_response_modifiers(_=Depends(verify_api_key)):
     """応答生成時の感情修飾パラメータ"""
-    return await emotion_adapter.get_response_modifiers()
+    return emotion_adapter.get_response_modifiers()
 
 
 # === C-7: Memory Archive ===
 @app.get("/memory/stats")
 async def memory_stats(_=Depends(verify_api_key)):
     """記憶テーブルの統計"""
-    return await memory_archiver.get_stats()
+    return memory_archiver.get_stats()
 
 @app.post("/memory/archive")
 async def memory_archive(_=Depends(verify_api_key)):
     """全テーブルのアーカイブ実行"""
-    return await memory_archiver.run_full_archive()
+    return memory_archiver.run_full_archive()
 
 @app.get("/memory/archive/history")
 async def memory_archive_history(_=Depends(verify_api_key)):
     """アーカイブ履歴"""
-    return await memory_archiver.get_archive_history()
+    return memory_archiver.get_archive_history()
 
 
 # === C-5: Plugin System ===
@@ -1400,7 +1400,7 @@ async def execute_plugin(req: dict, _=Depends(verify_api_key)):
     """プラグイン実行"""
     name = req.get("name", "")
     args = req.get("args", {})
-    return await plugin_registry.execute(name, args)
+    return plugin_registry.execute(name, args)
 
 @app.get("/plugins/tools")
 async def plugin_tool_definitions(_=Depends(verify_api_key)):
@@ -1601,12 +1601,12 @@ async def org_report(_=Depends(verify_api_key)):
 @app.get("/org/departments")
 async def org_departments(_=Depends(verify_api_key)):
     """部門一覧"""
-    return {"departments": await org.list_departments()}
+    return {"departments": org.list_departments()}
 
 @app.get("/org/agents")
 async def org_agents(_=Depends(verify_api_key)):
     """Agent一覧（詳細）"""
-    return {"agents": await org.list_agents()}
+    return {"agents": org.list_agents()}
 
 class AgentRegReq(BaseModel):
     agent_type: str

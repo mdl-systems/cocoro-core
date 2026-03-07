@@ -332,16 +332,19 @@ class TestEmotionE2E:
     async def test_emotion_adaptation(self, client):
         r = await client.get("/emotion/adaptation")
         assert r.status_code == 200
+        assert isinstance(r.json(), dict)
 
     @pytest.mark.asyncio
     async def test_emotion_decision_threshold(self, client):
         r = await client.get("/emotion/decision-threshold")
         assert r.status_code == 200
+        assert isinstance(r.json(), dict)
 
     @pytest.mark.asyncio
     async def test_emotion_response_modifiers(self, client):
         r = await client.get("/emotion/response-modifiers")
         assert r.status_code == 200
+        assert isinstance(r.json(), dict)
 
 # === Growth & Sync ===
 class TestGrowthE2E:
@@ -358,71 +361,66 @@ class TestGrowthE2E:
 
     @pytest.mark.asyncio
     async def test_sync_rate(self, client):
-        r = await client.get("/sync/rate")
+        r = await client.get("/growth/sync")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
     async def test_sync_timeline(self, client):
-        r = await client.get("/sync/timeline")
+        r = await client.get("/growth/sync/timeline")
         assert r.status_code == 200
 
 # === Evolution ===
 class TestEvolutionE2E:
     @pytest.mark.asyncio
     async def test_observe_recent(self, client):
-        r = await client.get("/observe/recent")
+        r = await client.get("/evolution/observations")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
     async def test_observe_stats(self, client):
-        r = await client.get("/observe/stats")
+        r = await client.get("/evolution/observations/stats")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
     async def test_evolve_evaluate(self, client):
-        r = await client.post("/evolve/evaluate")
+        r = await client.get("/evolution/evaluate")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_evolve_dashboard(self, client):
-        r = await client.get("/evolve/dashboard")
+    async def test_evolve_report(self, client):
+        r = await client.get("/evolution/report")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_evolve_metacognition(self, client):
-        r = await client.get("/evolve/metacognition")
+    async def test_meta_awareness(self, client):
+        r = await client.get("/meta/awareness")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_evolve_intelligence(self, client):
-        r = await client.get("/evolve/intelligence")
+    async def test_intelligence_report(self, client):
+        r = await client.get("/intelligence/report")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_evolve_safety(self, client):
-        r = await client.get("/evolve/safety")
+    async def test_safety_report(self, client):
+        r = await client.get("/safety/report")
         assert r.status_code == 200
 
 # === Personality Testing ===
 class TestPersonalityTestingE2E:
     @pytest.mark.asyncio
-    async def test_boot_start(self, client):
-        r = await client.post("/boot/start")
+    async def test_setup_start(self, client):
+        r = await client.post("/setup/start")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_boot_progress(self, client):
-        r = await client.get("/boot/progress")
+    async def test_calibration_start(self, client):
+        r = await client.post("/calibration/start")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_calibrate_start(self, client):
-        r = await client.post("/calibrate/start")
-        assert r.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_calibrate_report(self, client):
-        r = await client.get("/calibrate/report")
+    async def test_calibration_history(self, client):
+        r = await client.get("/calibration/history")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
@@ -434,7 +432,7 @@ class TestPersonalityTestingE2E:
 class TestCognitiveE2E:
     @pytest.mark.asyncio
     async def test_cognitive_profile(self, client):
-        r = await client.get("/cognitive/profile")
+        r = await client.get("/personality/cognitive")
         assert r.status_code == 200
 
 # === Clone ===
@@ -463,6 +461,7 @@ class TestPluginsE2E:
         r = await client.post("/plugins/execute",
             json={"name": "math", "args": {"expression": "2+3"}})
         assert r.status_code == 200
+        assert isinstance(r.json(), dict)
 
     @pytest.mark.asyncio
     async def test_plugins_tools(self, client):
@@ -605,8 +604,8 @@ class TestOrganizationE2E:
         assert r.status_code == 200
 
     @pytest.mark.asyncio
-    async def test_agent_list(self, client):
-        r = await client.get("/agent/list")
+    async def test_org_agents(self, client):
+        r = await client.get("/org/agents")
         assert r.status_code == 200
 
 # === Memory (C-7) ===
@@ -615,6 +614,7 @@ class TestMemoryE2E:
     async def test_memory_stats(self, client):
         r = await client.get("/memory/stats")
         assert r.status_code == 200
+        assert isinstance(r.json(), dict)
 
     @pytest.mark.asyncio
     async def test_memory_archive_history(self, client):
@@ -625,7 +625,7 @@ class TestMemoryE2E:
 class TestValueScoringE2E:
     @pytest.mark.asyncio
     async def test_score_response(self, client):
-        r = await client.post("/value/score",
+        r = await client.post("/scoring/response",
             json={"response": "I think we should help.", "context": "question about charity"})
         assert r.status_code == 200
 
@@ -633,7 +633,7 @@ class TestValueScoringE2E:
 class TestIntelligenceE2E:
     @pytest.mark.asyncio
     async def test_intelligence_report(self, client):
-        r = await client.get("/evolve/intelligence")
+        r = await client.get("/intelligence/report")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
@@ -650,13 +650,12 @@ class TestIntelligenceE2E:
 class TestSafetyE2E:
     @pytest.mark.asyncio
     async def test_safety_alignment(self, client):
-        r = await client.post("/safety/alignment",
-            json={"text": "hello world"})
+        r = await client.get("/safety/alignment")
         assert r.status_code == 200
 
     @pytest.mark.asyncio
     async def test_safety_report(self, client):
-        r = await client.get("/evolve/safety")
+        r = await client.get("/safety/report")
         assert r.status_code == 200
 
 # === Queue Status ===
