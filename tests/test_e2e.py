@@ -284,6 +284,62 @@ server_module.peer_comm.send_message = MagicMock(return_value={"sent": True})
 server_module.peer_comm.get_inbox = MagicMock(return_value=[])
 server_module.peer_comm.get_stats = MagicMock(return_value={"peers": 0})
 
+# D-2: Ollama テストランナー
+server_module.ollama_test = MagicMock()
+server_module.ollama_test.run_all = AsyncMock(return_value={"passed": 5, "total": 5, "all_passed": True})
+server_module.ollama_test.test_connection = AsyncMock(return_value={"passed": True, "test": "connection"})
+server_module.ollama_test.test_list_models = AsyncMock(return_value={"passed": True, "models": ["gemma2:2b"]})
+server_module.ollama_test.test_generate = AsyncMock(return_value={"passed": True, "response_preview": "hello"})
+
+# D-3: 連携プラットフォーム
+server_module.integrations = MagicMock()
+server_module.integrations.get_all_status = MagicMock(return_value={
+    "discord": {"platform": "discord", "configured": False},
+    "line": {"platform": "line", "configured": False},
+    "platforms_configured": 0,
+})
+server_module.integrations.discord = MagicMock()
+server_module.integrations.discord.send_message = AsyncMock(return_value={"sent": False, "error": "not configured"})
+server_module.integrations.discord.parse_interaction = MagicMock(return_value={"type": "unknown"})
+server_module.integrations.line = MagicMock()
+server_module.integrations.line.parse_webhook = MagicMock(return_value=[])
+server_module.integrations.line.reply = AsyncMock(return_value={"sent": False, "error": "not configured"})
+
+# D-6: 人格テンプレート
+server_module.templates = MagicMock()
+server_module.templates.list_templates = MagicMock(return_value=[
+    {"id": "default", "name": "バランス型", "category": "basic", "builtin": True},
+    {"id": "analytical", "name": "分析型", "category": "professional", "builtin": True},
+])
+server_module.templates.list_categories = MagicMock(return_value=["basic", "professional", "creative"])
+server_module.templates.get_template = MagicMock(return_value={"id": "default", "name": "バランス型"})
+server_module.templates.apply_template = MagicMock(return_value={"applied": True})
+server_module.templates.register_custom = MagicMock(return_value={"registered": True, "id": "custom_test"})
+
+# D-7: 監視・アラート
+server_module.monitoring = MagicMock()
+server_module.monitoring.get_health_dashboard = MagicMock(return_value={"status": "healthy", "metrics": {}})
+server_module.monitoring.metrics = MagicMock()
+server_module.monitoring.metrics.get_all = MagicMock(return_value={"counters": {}, "gauges": {}})
+server_module.monitoring.get_prometheus_metrics = MagicMock(return_value="# TYPE cocoro_uptime_seconds gauge\ncocoro_uptime_seconds 100\n")
+server_module.monitoring.check_alerts = MagicMock(return_value=[])
+server_module.monitoring._alerts = []
+server_module.monitoring.get_alert_history = MagicMock(return_value=[])
+server_module.monitoring.add_alert = MagicMock(return_value={"name": "test", "metric": "api.errors"})
+
+# D-8: 多言語対応
+server_module.i18n = MagicMock()
+server_module.i18n.supported_languages = [
+    {"code": "ja", "name": "日本語", "message_count": 22},
+    {"code": "en", "name": "English", "message_count": 22},
+]
+server_module.i18n.default_lang = "ja"
+server_module.i18n.get_all_messages = MagicMock(return_value={"greeting": "こんにちは！"})
+server_module.i18n.set_user_language = MagicMock(return_value={"user_id": "u1", "language": "en", "set": True})
+server_module.i18n.get_message = MagicMock(return_value="こんにちは！")
+
+# D-4: WebSocket
+server_module.ws_connections = []
 
 # === httpx の AsyncClient を使用 ===
 from httpx import AsyncClient, ASGITransport
@@ -844,3 +900,197 @@ class TestSecurityE2E:
         r = await client.get("/health")
         assert r.status_code == 200
         assert "X-RateLimit-Remaining" in r.headers
+
+
+# ===================== D-2: Ollama テスト E2E =====================
+
+class TestOllamaE2E:
+    @pytest.mark.asyncio
+    async def test_ollama_test_all(self, client):
+        """Ollama全テスト実行"""
+        r = await client.get("/ollama/test")
+        assert r.status_code == 200
+        data = r.json()
+        assert "passed" in data
+        assert "total" in data
+
+    @pytest.mark.asyncio
+    async def test_ollama_connection(self, client):
+        """Ollama接続テスト"""
+        r = await client.get("/ollama/test/connection")
+        assert r.status_code == 200
+        assert "passed" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_ollama_models(self, client):
+        """Ollamaモデル一覧テスト"""
+        r = await client.get("/ollama/test/models")
+        assert r.status_code == 200
+        assert "passed" in r.json()
+
+
+# ===================== D-3: 連携プラットフォーム E2E =====================
+
+class TestIntegrationsE2E:
+    @pytest.mark.asyncio
+    async def test_integrations_status(self, client):
+        """連携ステータス取得"""
+        r = await client.get("/integrations/status")
+        assert r.status_code == 200
+        data = r.json()
+        assert "discord" in data
+        assert "line" in data
+
+    @pytest.mark.asyncio
+    async def test_discord_send(self, client):
+        """Discord送信（未設定なのでエラー想定）"""
+        r = await client.post("/integrations/discord/send",
+                               json={"content": "test"})
+        assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_discord_interaction_ping(self, client):
+        """Discord Interaction PING"""
+        r = await client.post("/integrations/discord/interaction",
+                               json={"type": 1})
+        assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_line_webhook(self, client):
+        """LINE Webhook受信"""
+        r = await client.post("/integrations/line/webhook",
+                               json={"events": []})
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+
+
+# ===================== D-4: WebSocket E2E =====================
+
+class TestWebSocketE2E:
+    @pytest.mark.asyncio
+    async def test_ws_connection_count(self, client):
+        """WebSocket接続数"""
+        r = await client.get("/ws/connections")
+        assert r.status_code == 200
+        assert "active_connections" in r.json()
+
+
+# ===================== D-6: テンプレート E2E =====================
+
+class TestTemplatesE2E:
+    @pytest.mark.asyncio
+    async def test_list_templates(self, client):
+        """テンプレート一覧"""
+        r = await client.get("/templates")
+        assert r.status_code == 200
+        data = r.json()
+        assert "templates" in data
+
+    @pytest.mark.asyncio
+    async def test_template_categories(self, client):
+        """テンプレートカテゴリ"""
+        r = await client.get("/templates/categories")
+        assert r.status_code == 200
+        assert "categories" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_get_template(self, client):
+        """テンプレート詳細"""
+        r = await client.get("/templates/default")
+        assert r.status_code == 200
+        data = r.json()
+        assert "name" in data
+
+    @pytest.mark.asyncio
+    async def test_apply_template(self, client):
+        """テンプレート適用"""
+        r = await client.post("/templates/default/apply",
+                               json={"overrides": {"values": {"openness": 0.8}}})
+        assert r.status_code == 200
+        assert r.json().get("applied") is True
+
+    @pytest.mark.asyncio
+    async def test_register_custom_template(self, client):
+        """カスタムテンプレート登録"""
+        r = await client.post("/templates/custom",
+                               json={"id": "my_tpl", "name": "テスト",
+                                     "description": "テスト用", "values": {"openness": 0.9}})
+        assert r.status_code == 200
+        assert r.json().get("registered") is True
+
+
+# ===================== D-7: 監視 E2E =====================
+
+class TestMonitoringE2E:
+    @pytest.mark.asyncio
+    async def test_monitor_dashboard(self, client):
+        """監視ダッシュボード"""
+        r = await client.get("/monitor/dashboard")
+        assert r.status_code == 200
+        assert "status" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_monitor_metrics(self, client):
+        """メトリクス一覧"""
+        r = await client.get("/monitor/metrics")
+        assert r.status_code == 200
+        data = r.json()
+        assert "counters" in data
+
+    @pytest.mark.asyncio
+    async def test_monitor_prometheus(self, client):
+        """Prometheusメトリクス"""
+        r = await client.get("/monitor/metrics/prometheus")
+        assert r.status_code == 200
+        assert "cocoro_uptime_seconds" in r.text
+
+    @pytest.mark.asyncio
+    async def test_monitor_alerts(self, client):
+        """アラートチェック"""
+        r = await client.get("/monitor/alerts")
+        assert r.status_code == 200
+        assert "alerts" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_monitor_alert_history(self, client):
+        """アラート履歴"""
+        r = await client.get("/monitor/alerts/history")
+        assert r.status_code == 200
+        assert "history" in r.json()
+
+
+# ===================== D-8: 多言語 E2E =====================
+
+class TestI18nE2E:
+    @pytest.mark.asyncio
+    async def test_i18n_languages(self, client):
+        """サポート言語一覧"""
+        r = await client.get("/i18n/languages")
+        assert r.status_code == 200
+        data = r.json()
+        assert "languages" in data
+        assert "default" in data
+
+    @pytest.mark.asyncio
+    async def test_i18n_messages(self, client):
+        """メッセージ辞書"""
+        r = await client.get("/i18n/messages")
+        assert r.status_code == 200
+        assert "messages" in r.json()
+
+    @pytest.mark.asyncio
+    async def test_set_user_language(self, client):
+        """ユーザー言語設定"""
+        r = await client.post("/i18n/user/language",
+                               json={"user_id": "test_user", "language": "en"})
+        assert r.status_code == 200
+        assert r.json().get("set") is True
+
+    @pytest.mark.asyncio
+    async def test_translate_message(self, client):
+        """メッセージ翻訳"""
+        r = await client.get("/i18n/translate/greeting")
+        assert r.status_code == 200
+        data = r.json()
+        assert "message" in data
+        assert "key" in data

@@ -55,6 +55,11 @@ from personality.multi_user import MultiUserManager
 from personality.peer_communication import PersonalityCommunication
 from personality.voice_interface import VoiceInterface
 from infra.migration import MigrationRunner
+from brain.ollama_test import OllamaTestRunner
+from agent.integrations import IntegrationManager
+from personality.templates import PersonalityTemplateManager
+from infra.monitoring import MonitoringManager
+from infra.i18n import I18nManager
 
 class JsonFormatter(logging.Formatter):
     """JSON構造化ログフォーマッタ"""
@@ -139,11 +144,17 @@ local_llm = None
 user_manager = None
 peer_comm = None
 voice = None
+ollama_test = None
+integrations = None
+templates = None
+monitoring = None
+i18n = None
+ws_connections: list = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -201,6 +212,24 @@ async def lifespan(app: FastAPI):
 
     # C-3: 人格間コミュニケーション
     peer_comm = PersonalityCommunication("cocoro-main")
+
+    # D-2: Ollama 実機テストランナー
+    ollama_test = OllamaTestRunner(
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        model=os.getenv("OLLAMA_MODEL", "gemma2:2b"),
+    )
+
+    # D-3: Discord / LINE 連携
+    integrations = IntegrationManager()
+
+    # D-6: 人格テンプレート
+    templates = PersonalityTemplateManager()
+
+    # D-7: 監視・アラート
+    monitoring = MonitoringManager()
+
+    # D-8: 多言語対応
+    i18n = I18nManager(default_lang=os.getenv("DEFAULT_LANG", "ja"))
 
     # イベントハンドラ登録
     async def _on_task_completed(data):
@@ -1982,3 +2011,203 @@ async def identity_manifest(_=Depends(verify_api_key)):
         "device_fingerprint": hw_fingerprint,
         "protocol": "cocoro-core/v10-compatible",
     }
+
+
+# ===================== D-2: Ollama 実機テスト =====================
+
+@app.get("/ollama/test", tags=["ollama"])
+async def ollama_run_tests(_=Depends(verify_api_key)):
+    """Ollama 全テスト実行"""
+    return await ollama_test.run_all()
+
+@app.get("/ollama/test/connection", tags=["ollama"])
+async def ollama_test_connection(_=Depends(verify_api_key)):
+    """Ollama 接続テスト"""
+    return await ollama_test.test_connection()
+
+@app.get("/ollama/test/models", tags=["ollama"])
+async def ollama_test_models(_=Depends(verify_api_key)):
+    """Ollama モデル一覧テスト"""
+    return await ollama_test.test_list_models()
+
+@app.get("/ollama/test/generate", tags=["ollama"])
+async def ollama_test_generate(_=Depends(verify_api_key)):
+    """Ollama 推論テスト"""
+    return await ollama_test.test_generate()
+
+
+# ===================== D-3: Discord / LINE 連携 =====================
+
+@app.get("/integrations/status", tags=["integrations"])
+async def integration_status(_=Depends(verify_api_key)):
+    """連携プラットフォーム ステータス"""
+    return integrations.get_all_status()
+
+@app.post("/integrations/discord/send", tags=["integrations"])
+async def discord_send(request: Request, _=Depends(verify_api_key)):
+    """Discord メッセージ送信"""
+    body = await request.json()
+    return await integrations.discord.send_message(
+        body.get("content", ""), body.get("username", "cocoro"))
+
+@app.post("/integrations/discord/interaction", tags=["integrations"])
+async def discord_interaction(request: Request):
+    """Discord Interaction Webhook"""
+    body = await request.json()
+    parsed = integrations.discord.parse_interaction(body)
+    if parsed["type"] == "ping":
+        return parsed["response"]
+    return parsed
+
+@app.post("/integrations/line/webhook", tags=["integrations"])
+async def line_webhook(request: Request):
+    """LINE Webhook 受信"""
+    body = await request.json()
+    events = integrations.line.parse_webhook(body)
+    return {"events": events, "count": len(events)}
+
+@app.post("/integrations/line/reply", tags=["integrations"])
+async def line_reply(request: Request, _=Depends(verify_api_key)):
+    """LINE 返信送信"""
+    body = await request.json()
+    return await integrations.line.reply(
+        body.get("reply_token", ""), body.get("text", ""))
+
+
+# ===================== D-4: WebSocket リアルタイム =====================
+
+from starlette.websockets import WebSocket, WebSocketDisconnect
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    """WebSocket リアルタイム接続"""
+    await ws.accept()
+    ws_connections.append(ws)
+    try:
+        while True:
+            data = await ws.receive_json()
+            event_type = data.get("type", "ping")
+            if event_type == "ping":
+                await ws.send_json({"type": "pong"})
+            elif event_type == "subscribe":
+                await ws.send_json({"type": "subscribed",
+                                    "channel": data.get("channel", "all")})
+            else:
+                await ws.send_json({"type": "echo", "data": data})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if ws in ws_connections:
+            ws_connections.remove(ws)
+
+@app.get("/ws/connections", tags=["websocket"])
+async def ws_connection_count(_=Depends(verify_api_key)):
+    """WebSocket 接続数"""
+    return {"active_connections": len(ws_connections)}
+
+
+# ===================== D-6: 人格テンプレート =====================
+
+@app.get("/templates", tags=["templates"])
+async def list_templates(_=Depends(verify_api_key)):
+    """テンプレート一覧"""
+    return {"templates": templates.list_templates()}
+
+@app.get("/templates/categories", tags=["templates"])
+async def template_categories(_=Depends(verify_api_key)):
+    """テンプレートカテゴリ一覧"""
+    return {"categories": templates.list_categories()}
+
+@app.get("/templates/{template_id}", tags=["templates"])
+async def get_template(template_id: str, _=Depends(verify_api_key)):
+    """テンプレート詳細"""
+    result = templates.get_template(template_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+@app.post("/templates/{template_id}/apply", tags=["templates"])
+async def apply_template(template_id: str, request: Request,
+                          _=Depends(verify_api_key)):
+    """テンプレート適用"""
+    body = await request.json()
+    result = templates.apply_template(template_id, body.get("overrides"))
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+@app.post("/templates/custom", tags=["templates"])
+async def register_custom_template(request: Request,
+                                     _=Depends(verify_api_key)):
+    """カスタムテンプレート登録"""
+    body = await request.json()
+    tid = body.pop("id", "custom_" + str(uuid.uuid4())[:8])
+    return templates.register_custom(tid, body)
+
+
+# ===================== D-7: 監視・アラート =====================
+
+@app.get("/monitor/dashboard", tags=["monitoring"])
+async def monitor_dashboard(_=Depends(verify_api_key)):
+    """監視ダッシュボード"""
+    return monitoring.get_health_dashboard()
+
+@app.get("/monitor/metrics", tags=["monitoring"])
+async def monitor_metrics(_=Depends(verify_api_key)):
+    """メトリクス一覧"""
+    return monitoring.metrics.get_all()
+
+@app.get("/monitor/metrics/prometheus", tags=["monitoring"])
+async def monitor_prometheus():
+    """Prometheus テキスト形式メトリクス"""
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        monitoring.get_prometheus_metrics(),
+        media_type="text/plain; version=0.0.4")
+
+@app.get("/monitor/alerts", tags=["monitoring"])
+async def monitor_alerts(_=Depends(verify_api_key)):
+    """アラートチェック"""
+    fired = monitoring.check_alerts()
+    return {"alerts": fired, "total_rules": len(monitoring._alerts)}
+
+@app.get("/monitor/alerts/history", tags=["monitoring"])
+async def monitor_alert_history(_=Depends(verify_api_key)):
+    """アラート履歴"""
+    return {"history": monitoring.get_alert_history()}
+
+@app.post("/monitor/alerts", tags=["monitoring"])
+async def add_alert_rule(request: Request, _=Depends(verify_api_key)):
+    """カスタムアラートルール追加"""
+    body = await request.json()
+    return monitoring.add_alert(
+        body["name"], body["metric"], body["condition"],
+        body["threshold"], body.get("severity", "warning"))
+
+
+# ===================== D-8: 多言語対応 =====================
+
+@app.get("/i18n/languages", tags=["i18n"])
+async def i18n_languages(_=Depends(verify_api_key)):
+    """サポート言語一覧"""
+    return {"languages": i18n.supported_languages,
+            "default": i18n.default_lang}
+
+@app.get("/i18n/messages", tags=["i18n"])
+async def i18n_messages(lang: str = None, _=Depends(verify_api_key)):
+    """メッセージ辞書"""
+    return {"messages": i18n.get_all_messages(lang), "language": lang or i18n.default_lang}
+
+@app.post("/i18n/user/language", tags=["i18n"])
+async def set_user_language(request: Request, _=Depends(verify_api_key)):
+    """ユーザー言語設定"""
+    body = await request.json()
+    return i18n.set_user_language(body.get("user_id", "default"),
+                                  body.get("language", "ja"))
+
+@app.get("/i18n/translate/{key}", tags=["i18n"])
+async def translate_message(key: str, lang: str = None, _=Depends(verify_api_key)):
+    """メッセージ翻訳"""
+    return {"key": key,
+            "message": i18n.get_message(key, lang),
+            "language": lang or i18n.default_lang}
