@@ -6,8 +6,8 @@ services:
       context: ../../
       dockerfile: infra/docker/Dockerfile
     container_name: cocoro-core
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -24,6 +24,7 @@ services:
       - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
       - IP_WHITELIST=${IP_WHITELIST:-}
       - IP_BLACKLIST=${IP_BLACKLIST:-}
       - FORCE_HTTPS=${FORCE_HTTPS:-false}
@@ -43,6 +44,19 @@ services:
         condition: service_healthy
     mem_limit: 1g
     cpus: 1.0
+    restart: unless-stopped
+
+  cocoro-nginx:
+    image: nginx:alpine
+    container_name: cocoro-nginx
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - cocoro
+    mem_limit: 64m
+    cpus: 0.1
     restart: unless-stopped
 
   cocoro-postgres:
