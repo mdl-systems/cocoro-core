@@ -22,7 +22,7 @@ LLMが変わっても、記憶・価値観・感情・判断軸は維持され�
 |-----------|-----------|---------|
 | Language | Python | 3.11 |
 | API Framework | FastAPI | 0.109 |
-| LLM (Cloud) | Google Gemini | 2.5 Flash |
+| LLM (Cloud) | Google Gemini | 2.5 Flash Lite |
 | LLM (Local) | Ollama | - |
 | Database | PostgreSQL + pgvector | 16 |
 | Cache / Queue | Redis | 7 |
@@ -36,17 +36,22 @@ LLMが変わっても、記憶・価値観・感情・判断軸は維持され�
 設定ファイル: `infra/docker/.env`（`.env.example` からコピー）
 
 ```bash
-LLM_PROVIDER=gemini           # or ollama
-GEMINI_API_KEY=<key>          # 必須（Gemini使用時）
-GEMINI_MODEL=gemini-2.0-flash
-COCORO_API_KEY=<key>          # API認証キー（必須）
+LLM_PROVIDER=gemini              # or ollama
+GEMINI_API_KEY=<key>             # 必須（Gemini使用時）
+GEMINI_MODEL=gemini-2.5-flash-lite
+COCORO_API_KEY=<key>             # API認証キー（必須）
 POSTGRES_PASSWORD=cocoro_secret
-JWT_SECRET=<secret>           # 空=API Key認証
-FORCE_HTTPS=false             # 本番はtrue
+JWT_SECRET=<secret>              # 空=API Key認証
+IP_WHITELIST=                    # カンマ区切りで許可IP。空=全許可
+IP_BLACKLIST=                    # カンマ区切りでブロックIP。空=なし
+FORCE_HTTPS=false                # 本番はtrue
 RATE_LIMIT_ENABLED=true
 LOGIN_MAX_FAILURES=10
 LOGIN_LOCKOUT_SECONDS=300
 ```
+
+> **注意**: `.env.example` をコピーした後、インラインコメント（`#`以降）を残さないこと。
+> `IP_WHITELIST=` の後ろにコメントがあると全IPブロックになるバグがあります（修正済み）。
 
 ---
 
@@ -208,4 +213,9 @@ cocoro-core/
 
 | 日付 | 更新内容 |
 |------|---------|
+| 2026-03-09 | クロスセッション記憶を `memory_engine.build_context()` に実装 |
+| 2026-03-09 | `/memory/search` `/memory/conversations` エンドポイント追加 |
+| 2026-03-09 | `/memory/stats` `/memory/archive` の `await` 抜け修正 |
+| 2026-03-09 | `.env.example` インラインコメントによる `IP_WHITELIST` バグ修正 |
+| 2026-03-09 | `nginx.conf` / `docker-compose.yml` に Nginx サービス追加 |
 | 2026-03-08 | 初版作成 |

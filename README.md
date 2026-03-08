@@ -226,7 +226,7 @@ cocoro-core/                        53 modules
 │   ├── voice_interface.py          # 音声インターフェース (C-8)
 │   └── setup/boot_wizard.py        # 初期設定ウィザード (40問)
 ├── memory/
-│   ├── memory_engine.py            # 記憶統合エンジン
+│   ├── memory_engine.py            # 記憶統合エンジン（クロスセッション記憶対応）
 │   ├── short_term/                 # 短期記憶 (Redis)
 │   ├── long_term/                  # 長期記憶 (PostgreSQL)
 │   ├── vector_memory/              # ベクトル検索 (pgvector)
@@ -298,6 +298,7 @@ docker exec cocoro-core python -m pytest tests/test_security.py -v   # Security 
 | C-8 | Voice Interface (音声インターフェース) | ✅ |
 | D-1 | E2E Tests (99 API統合テスト) | ✅ |
 | D-10 | Security (Rate Limit / IP Filter / Login Throttle) | ✅ |
+| **D-11** | **クロスセッション記憶 + `/memory/search` + nginx固定** | ✅ |
 
 ---
 
