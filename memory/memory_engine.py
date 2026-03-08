@@ -11,17 +11,35 @@ class MemoryEngine:
         self.short = ShortTermMemory(redis_url)
         self.long = LongTermMemory(db)
         self.vector = VectorMemory(db)
+        self._db = db
 
     async def build_context(self, session_id: str, query: str = "") -> str:
         """現在の文脈を構築（感情付き）"""
         parts = []
 
-        # Short-term: 直近の会話（10件に増加）
+        # Short-term: 直近の会話（現セッション・10件）
         messages = await self.short.get_messages(session_id, limit=10)
         if messages:
             parts.append("【直近の会話】")
             for m in messages:
                 parts.append(f"{m['role']}: {m['content'][:200]}")
+
+        # Long-term: 過去セッションの関連会話（クロスセッション記憶）
+        if query and len(query) >= 2:
+            try:
+                past_rows = await self._db.fetch(
+                    "SELECT role, content FROM conversation_log "
+                    "WHERE content ILIKE $1 "
+                    "AND session_id != $2::uuid "
+                    "ORDER BY created_at DESC LIMIT 5",
+                    f"%{query[:20]}%", session_id
+                )
+                if past_rows:
+                    parts.append("\n【過去の会話から関連する記憶】")
+                    for r in past_rows:
+                        parts.append(f"- ({r['role']}) {r['content'][:150]}")
+            except Exception:
+                pass  # 検索失敗時はスキップ
 
         # Long-term: 過去の判断
         decisions = await self.long.get_past_decisions(limit=3)
