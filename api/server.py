@@ -1547,17 +1547,66 @@ async def emotion_response_modifiers(_=Depends(verify_api_key)):
 @app.get("/memory/stats")
 async def memory_stats(_=Depends(verify_api_key)):
     """記憶テーブルの統計"""
-    return memory_archiver.get_stats()
+    return await memory_archiver.get_stats()  # fix: was missing await
 
 @app.post("/memory/archive")
 async def memory_archive(_=Depends(verify_api_key)):
     """全テーブルのアーカイブ実行"""
-    return memory_archiver.run_full_archive()
+    return await memory_archiver.run_full_archive()  # fix: was missing await
 
 @app.get("/memory/archive/history")
 async def memory_archive_history(_=Depends(verify_api_key)):
     """アーカイブ履歴"""
-    return memory_archiver.get_archive_history()
+    return await memory_archiver.get_archive_history()  # fix: was missing await
+
+
+@app.get("/memory/search")
+async def memory_search(q: str, limit: int = 10, _=Depends(verify_api_key)):
+    """長期記憶（会話ログ）をテキスト検索"""
+    rows = await db_pool.fetch(
+        "SELECT id, session_id, role, content, emotion, created_at "
+        "FROM conversation_log "
+        "WHERE content ILIKE $1 "
+        "ORDER BY created_at DESC LIMIT $2",
+        f"%{q}%", limit
+    )
+    results = [
+        {
+            "id": str(r["id"]),
+            "session_id": str(r["session_id"]),
+            "role": r["role"],
+            "content": r["content"],
+            "emotion": r["emotion"],
+            "created_at": str(r["created_at"]),
+        }
+        for r in rows
+    ]
+    return {"results": results, "count": len(results), "query": q}
+
+
+@app.get("/memory/conversations")
+async def memory_conversations(limit: int = 20, _=Depends(verify_api_key)):
+    """会話セッション一覧（直近N件）"""
+    rows = await db_pool.fetch(
+        "SELECT session_id, COUNT(*) as msg_count, "
+        "MIN(created_at) as started_at, MAX(created_at) as last_at, "
+        "MAX(emotion) as last_emotion "
+        "FROM conversation_log "
+        "GROUP BY session_id "
+        "ORDER BY last_at DESC LIMIT $1",
+        limit
+    )
+    sessions = [
+        {
+            "session_id": str(r["session_id"]),
+            "message_count": r["msg_count"],
+            "started_at": str(r["started_at"]),
+            "last_at": str(r["last_at"]),
+            "last_emotion": r["last_emotion"],
+        }
+        for r in rows
+    ]
+    return {"sessions": sessions, "count": len(sessions)}
 
 
 # === C-5: Plugin System ===
