@@ -548,37 +548,62 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
 
 
 # === JWT Token 発行エンドポイント ===
-class TokenReq(BaseModel):
-    api_key: str
+# SDKは POST /auth/token に X-API-Key ヘッダーで送信し、
+# レスポンスの access_token を Bearer トークンとして使う。
+# JWT_SECRET が未設定の場合は API Key 自体をトークンとして返す
+# （verify_api_key が Bearer <COCORO_API_KEY> を受け付けるため動作する）
 
 @app.post("/auth/token")
-async def issue_token(req: TokenReq, request: Request):
-    """API Key を検証して JWT トークンを発行"""
+async def issue_token(request: Request):
+    """API Key を検証してトークンを発行（SDK互換）
+
+    入力: X-API-Key ヘッダー or JSON body {"api_key": "..."}
+    出力: {"access_token": "...", "token_type": "bearer", "expires_in": 3600}
+    """
     client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown").split(",")[0].strip()
 
-    if not settings.JWT_SECRET:
-        raise HTTPException(status_code=501, detail="JWT未設定。API Key認証を使用してください")
-    if not settings.COCORO_API_KEY or req.api_key != settings.COCORO_API_KEY:
-        # D-10: 認証失敗を記録
+    # API Key を取得（X-API-Key ヘッダー優先 / body fallback）
+    api_key = request.headers.get("X-API-Key", "")
+    if not api_key:
+        try:
+            body = await request.json()
+            api_key = body.get("api_key", "")
+        except Exception:
+            pass
+
+    # API Key 検証
+    if settings.COCORO_API_KEY and api_key != settings.COCORO_API_KEY:
         login_throttle.record_failure(client_ip)
         logger.warning(f"Auth failure from {client_ip}")
         raise HTTPException(status_code=401, detail="無効なAPI Key")
 
-    # D-10: 認証成功でリセット
     login_throttle.record_success(client_ip)
 
-    import hashlib, hmac, base64, json as _json, time
-    now = int(time.time())
-    payload = {"sub": "cocoro", "iat": now, "exp": now + settings.JWT_EXPIRE_HOURS * 3600}
-    def b64_encode(data):
-        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-    header = b64_encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-    body = b64_encode(_json.dumps(payload).encode())
-    signing_input = f"{header}.{body}".encode()
-    signature = b64_encode(hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
-    token = f"{header}.{body}.{signature}"
+    # JWT_SECRET が設定されていれば JWT を発行、なければ API Key をそのまま返す
+    if settings.JWT_SECRET:
+        import hashlib, hmac, base64, json as _json, time
+        now = int(time.time())
+        payload = {"sub": "cocoro", "iat": now, "exp": now + settings.JWT_EXPIRE_HOURS * 3600}
+        def b64_encode(data):
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+        header = b64_encode(_json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+        body = b64_encode(_json.dumps(payload).encode())
+        signing_input = f"{header}.{body}".encode()
+        signature = b64_encode(hmac.new(settings.JWT_SECRET.encode(), signing_input, hashlib.sha256).digest())
+        token = f"{header}.{body}.{signature}"
+        expires_in = settings.JWT_EXPIRE_HOURS * 3600
+    else:
+        # JWT_SECRET未設定: API Key をそのまま Bearer トークンとして返す
+        # verify_api_key は Bearer <COCORO_API_KEY> を受け付けるため機能する
+        token = api_key or settings.COCORO_API_KEY
+        expires_in = 3600
 
-    return {"token": token, "expires_in": settings.JWT_EXPIRE_HOURS * 3600, "token_type": "Bearer"}
+    return {
+        "access_token": token,   # SDK が期待するフィールド名
+        "token": token,          # 後方互換
+        "token_type": "bearer",
+        "expires_in": expires_in,
+    }
 
 
 # === D-10: Security Management API ===
