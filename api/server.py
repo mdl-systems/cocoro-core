@@ -867,6 +867,9 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
 
     async def _stream_generator():
         try:
+            # 即座にキープアライブを送信（クライアントのタイムアウト防止）
+            yield ": ping\n\n"
+
             # 1. ユーザーメッセージを記憶
             await memory.short.add_message(session_id, "user", req.message)
             await memory.long.save_message(session_id, "user", req.message, emotion="neutral")
@@ -879,7 +882,8 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
                 yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "blocked", "emotion": {"dominant": "neutral"}})}\n\n'
                 return
 
-            # 2. 分類（高速・非ストリーミング）
+            # 2. 分類（高速・非ストリーミング）- LLM呼び出し前にkeepalive
+            yield ": thinking\n\n"
             classify_prompt = decision.build_classify_prompt(req.message)
             raw = await llm.generate(classify_prompt)
             classification = decision.parse_classification(raw)
