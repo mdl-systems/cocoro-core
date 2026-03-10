@@ -851,6 +851,116 @@ async def chat(req: ChatReq, _=Depends(verify_api_key)):
         raise HTTPException(status_code=500, detail=f"内部エラー: {type(e).__name__}")
 
 
+# === Chat Stream (SSEストリーミング版) ===
+from fastapi.responses import StreamingResponse as _StreamingResponse
+import json as _json
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
+    """SSEストリーミングチャット（cocoro-sdk ChatStream互換）
+
+    SSE形式:
+      チャンク: data: {"text": "..."}\n\n
+      最終:    data: {"type": "final", "sessionId": "...", "action": "...", "emotion": {"dominant": "..."}}\n\n
+    """
+    session_id = req.session_id or str(uuid.uuid4())
+
+    async def _stream_generator():
+        try:
+            # 1. ユーザーメッセージを記憶
+            await memory.short.add_message(session_id, "user", req.message)
+            await memory.long.save_message(session_id, "user", req.message, emotion="neutral")
+
+            # Governance チェック
+            gov_check = await governance.check_input(req.message)
+            if not gov_check.passed:
+                error_text = gov_check.suggestion or "そのリクエストにはお応えできません。"
+                yield f'data: {_json.dumps({"text": error_text})}\n\n'
+                yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "blocked", "emotion": {"dominant": "neutral"}})}\n\n'
+                return
+
+            # 2. 分類（高速・非ストリーミング）
+            classify_prompt = decision.build_classify_prompt(req.message)
+            raw = await llm.generate(classify_prompt)
+            classification = decision.parse_classification(raw)
+            action = classification.get("action", "chat")
+            emotion = classification.get("emotion", "neutral")
+            await personality.emotion.adjust(emotion)
+            personality.emotion._cache = None
+
+            emotion_state = await personality.emotion.get_state()
+            dominant_emotion = emotion_state.dominant()
+
+            # delegateはストリーミング非対応 → /chat フォールバック
+            if action == "delegate":
+                agent_type = classification.get("agent") or router.route(req.message)
+                task_name = req.message[:80]
+                row = await db_pool.fetchrow(
+                    "INSERT INTO tasks (title, description, assigned_agent) VALUES ($1,$2,$3) RETURNING id",
+                    task_name, req.message, agent_type)
+                task_id = str(row["id"])
+                result = await worker.execute(task_id, task_name, req.message, agent_type)
+                response_text = result.get("output", result.get("error", "実行失敗"))
+                yield f'data: {_json.dumps({"text": response_text})}\n\n'
+                yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": action, "emotion": {"dominant": dominant_emotion}})}\n\n'
+                return
+
+            # 3. システムプロンプト + コンテキスト構築
+            system_prompt = await personality.build_system_prompt()
+            friction = await growth.get_creative_friction()
+            if friction:
+                system_prompt += friction
+
+            if action in ("think", "chat"):
+                context = await memory.build_context(session_id, req.message)
+                full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
+            elif action == "decide":
+                category = classification.get("category", "general")
+                full_prompt = await decision.build_decision_prompt(req.message, category)
+            else:
+                # learn など
+                context = await memory.build_context(session_id, req.message)
+                full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
+
+            # 4. Geminiストリーミング → SSEチャンク送信
+            full_response = ""
+            async for chunk_text in llm.generate_stream(full_prompt, system_prompt):
+                full_response += chunk_text
+                yield f'data: {_json.dumps({"text": chunk_text})}\n\n'
+
+            # 5. 応答を記憶に保存
+            await memory.short.add_message(session_id, "cocoro", full_response)
+            await memory.long.save_message(session_id, "cocoro", full_response, emotion=dominant_emotion)
+
+            # 6. 自己観察
+            try:
+                await observer.observe_conversation(session_id, req.message, full_response, dominant_emotion)
+            except Exception:
+                pass
+
+            # 7. 最終イベント
+            yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": action, "emotion": {"dominant": dominant_emotion}})}\n\n'
+
+        except LLMError as e:
+            logger.error(f"[{session_id[:8]}] chat_stream LLMError: {e}")
+            yield f'data: {_json.dumps({"text": f"AI応答エラー: {e}"})}\n\n'
+            yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+        except Exception as e:
+            logger.error(f"[{session_id[:8]}] chat_stream error: {type(e).__name__}: {e}")
+            yield f'data: {_json.dumps({"text": "応答の生成中にエラーが発生しました。"})}\n\n'
+            yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+
+    return _StreamingResponse(
+        _stream_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # === Think (思考API) ===
 class ThinkReq(BaseModel):
     question: str

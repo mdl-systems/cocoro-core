@@ -101,6 +101,81 @@ class LLMRuntime:
         except Exception:
             return {"provider": self.provider, "healthy": False}
 
+    async def generate_stream(self, prompt: str, system_prompt: str = ""):
+        """LLMストリーミング生成（AsyncGenerator）
+
+        Gemini / Ollama の同期ストリーミングをスレッドエグゼキュータで実行し、
+        非同期ジェネレーターとして chunk を yield する。
+        """
+        import queue as _queue
+        import threading
+
+        chunk_queue: "_queue.Queue[str | None | Exception]" = _queue.Queue()
+
+        def _sync_stream():
+            try:
+                if self.provider == "ollama":
+                    import httpx
+                    with httpx.Client(timeout=120) as client:
+                        with client.stream("POST", f"{self.ollama_url}/api/generate", json={
+                            "model": self.ollama_model,
+                            "prompt": prompt,
+                            "system": system_prompt,
+                            "stream": True,
+                        }) as resp:
+                            import json as _json
+                            for line in resp.iter_lines():
+                                if line:
+                                    try:
+                                        data = _json.loads(line)
+                                        text = data.get("response", "")
+                                        if text:
+                                            chunk_queue.put(text)
+                                        if data.get("done"):
+                                            break
+                                    except Exception:
+                                        pass
+                else:
+                    # Gemini streaming
+                    self._rate_limit()
+                    import google.generativeai as genai
+                    genai.configure(api_key=self.gemini_key)
+                    model = genai.GenerativeModel(
+                        self.gemini_model,
+                        system_instruction=system_prompt if system_prompt else None,
+                    )
+                    response = model.generate_content(prompt, stream=True)
+                    for chunk in response:
+                        text = getattr(chunk, "text", "") or ""
+                        if text:
+                            chunk_queue.put(text)
+            except Exception as e:
+                chunk_queue.put(e)
+            finally:
+                chunk_queue.put(None)  # sentinel
+
+        thread = threading.Thread(target=_sync_stream, daemon=True)
+        thread.start()
+
+        while True:
+            # ノンブロッキングでキューをポーリング
+            try:
+                import queue as _q
+                item = chunk_queue.get_nowait()
+            except _q.Empty:
+                await asyncio.sleep(0.01)
+                continue
+
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                logger.error(f"[generate_stream] error: {item}")
+                break
+            yield item
+
+        thread.join(timeout=5)
+
+
     async def generate_with_tools(self, prompt: str, tools: list[dict],
                                    system_prompt: str = "") -> dict:
         """Gemini Function Calling — ツール定義を渡してLLMに呼び出しを判断させる
