@@ -9,7 +9,7 @@ services:
     ports:
       - "8001:8000"
     networks:
-      - cocoro-console_cocoro-net
+      - cocoro-net
     environment:
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -63,6 +63,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - cocoro-net
     mem_limit: 512m
     cpus: 0.5
     restart: unless-stopped
@@ -76,13 +78,16 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - cocoro-net
     mem_limit: 300m
     cpus: 0.25
     restart: unless-stopped
 
 networks:
-  cocoro-console_cocoro-net:
+  cocoro-net:
     external: true
+    name: cocoro-net
 
 volumes:
   pg-data:
