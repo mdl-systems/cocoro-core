@@ -439,6 +439,9 @@ app.add_middleware(
 
 # === D-10: Security Middleware ===
 from api.security import SecurityMiddleware, ip_filter, login_throttle, rate_limiter
+from api.routes.agent_roles import router as agent_roles_router, get_role_system_prompt
+
+app.include_router(agent_roles_router)
 
 # IP Filter 設定
 ip_filter.configure(
@@ -691,6 +694,7 @@ async def health():
 class ChatReq(BaseModel):
     message: str
     session_id: str | None = None
+    role_id: str | None = None  # 専門職エージェントロールID（例: "lawyer", "engineer"）
 
 class ChatRes(BaseModel):
     response: str
@@ -910,10 +914,15 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
                 return
 
             # 3. システムプロンプト + コンテキスト構築
-            system_prompt = await personality.build_system_prompt()
-            friction = await growth.get_creative_friction()
-            if friction:
-                system_prompt += friction
+            # role_id 指定時はそのロールのsystem_promptを使用
+            role_prompt = get_role_system_prompt(req.role_id)
+            if role_prompt:
+                system_prompt = role_prompt
+            else:
+                system_prompt = await personality.build_system_prompt()
+                friction = await growth.get_creative_friction()
+                if friction:
+                    system_prompt += friction
 
             if action in ("think", "chat"):
                 context = await memory.build_context(session_id, req.message)
