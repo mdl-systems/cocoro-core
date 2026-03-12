@@ -415,3 +415,30 @@ INSERT INTO goals (title, description, goal_type, priority) VALUES
     ('人格の一貫性を確立する', '全ての判断において価値観と信念に基づく一貫した応答を行う', 'life_mission', 9),
     ('オーナーの事業成長を支援する', '経営判断、戦略策定、業務効率化を通じて組織に貢献', 'long_term', 8),
     ('知識と判断力を向上させる', '日々の対話と経験から学び、より正確な判断を行う', 'long_term', 7);
+
+-- ============================================
+-- Migration: knowledge_base 追加カラム (user_memory 対応)
+-- ============================================
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='knowledge_base' AND column_name='category'
+    ) THEN
+        ALTER TABLE knowledge_base ADD COLUMN category TEXT DEFAULT 'general';
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='knowledge_base' AND column_name='updated_at'
+    ) THEN
+        ALTER TABLE knowledge_base ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+        CREATE TRIGGER kb_updated BEFORE UPDATE ON knowledge_base
+            FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_kb_source ON knowledge_base (source);
+CREATE INDEX IF NOT EXISTS idx_kb_category ON knowledge_base (category);
+

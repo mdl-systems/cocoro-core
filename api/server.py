@@ -49,6 +49,7 @@ from personality.calibration import PersonalityCalibrationEngine
 from personality.clone_engine import PersonalityCloneEngine
 from personality.emotion_adapter import EmotionBehaviorAdapter
 from memory.memory_archiver import MemoryArchiver
+from memory.user_memories import UserMemoryEngine
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from brain.local_llm import LocalLLMManager
 from personality.multi_user import MultiUserManager
@@ -159,11 +160,12 @@ ws_connections: list = []
 personality_profiles: dict = {}
 personality_learning_engine = None
 compat_engine = None
+user_memories = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -175,6 +177,7 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Migration warning: {e}")
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
+    user_memories = UserMemoryEngine(db_pool)
     reasoning = ReasoningEngine(personality, memory)
     decision = DecisionGraph(personality, memory)
 
@@ -994,6 +997,15 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
                 if friction:
                     system_prompt += friction
 
+            # ユーザー記憶をsystem promptに注入
+            if user_memories is not None:
+                try:
+                    mem_section = await user_memories.build_prompt_section()
+                    if mem_section:
+                        system_prompt = mem_section + "\n\n" + system_prompt
+                except Exception:
+                    pass
+
             if action in ("think", "chat"):
                 context = await memory.build_context(session_id, req.message)
                 full_prompt = f"{context}\n\n【ユーザー】\n{req.message}" if context else req.message
@@ -1019,6 +1031,13 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
             try:
                 await personality.emotion.analyze_and_adjust(req.message)
                 await personality.emotion.analyze_and_adjust(full_response)
+            except Exception:
+                pass
+
+            # 5c. ユーザー発言から記憶を自動抽出
+            try:
+                if user_memories is not None:
+                    await user_memories.auto_extract(req.message, full_response)
             except Exception:
                 pass
 
@@ -1151,6 +1170,77 @@ async def get_decisions(category: str = None, limit: int = 20, _=Depends(verify_
 @app.get("/memory/learnings")
 async def get_learnings(limit: int = 20, _=Depends(verify_api_key)):
     return {"learnings": await memory.long.get_learnings(limit)}
+
+
+# === User Memory (自動学習記憶) ===
+@app.get("/memory/list")
+async def memory_list(
+    memory_type: str = None,
+    limit: int = 50,
+    _=Depends(verify_api_key)
+):
+    """保存された記憶一覧を返す。memory_type で絞り込み可能"""
+    if user_memories is None:
+        return {"memories": [], "count": 0}
+    memories = await user_memories.list_all(memory_type=memory_type, limit=limit)
+    return {"memories": memories, "count": len(memories)}
+
+
+@app.get("/memory/search")
+async def memory_search_user(q: str, limit: int = 10, _=Depends(verify_api_key)):
+    """キーワードで記憶を検索（user_memory + conversation_log 両方）"""
+    results = []
+    # user_memories テーブル検索
+    if user_memories is not None:
+        results = await user_memories.search(q, limit)
+    # フォールバック: conversation_log 検索
+    if not results:
+        rows = await db_pool.fetch(
+            "SELECT id, session_id, role, content, emotion, created_at "
+            "FROM conversation_log "
+            "WHERE content ILIKE $1 "
+            "ORDER BY created_at DESC LIMIT $2",
+            f"%{q}%", limit
+        )
+        results = [
+            {
+                "id": str(r["id"]),
+                "type": "conversation",
+                "type_label": "会話ログ",
+                "topic": r["role"],
+                "content": r["content"],
+                "confidence": 1.0,
+                "created_at": str(r["created_at"])[:10],
+            }
+            for r in rows
+        ]
+    return {"results": results, "count": len(results), "query": q}
+
+
+@app.delete("/memory/{memory_id}")
+async def memory_delete(memory_id: str, _=Depends(verify_api_key)):
+    """特定の記憶を削除"""
+    if user_memories is None:
+        raise HTTPException(status_code=503, detail="Memory engine not ready")
+    deleted = await user_memories.delete(memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": True, "id": memory_id}
+
+
+@app.post("/memory/add")
+async def memory_add_manual(
+    topic: str,
+    content: str,
+    memory_type: str = "general",
+    confidence: float = 0.8,
+    _=Depends(verify_api_key)
+):
+    """記憶を手動追加"""
+    if user_memories is None:
+        raise HTTPException(status_code=503, detail="Memory engine not ready")
+    mem_id = await user_memories.add(topic, content, memory_type, confidence)
+    return {"id": mem_id, "topic": topic, "type": memory_type}
 
 
 # === Decision Outcome（判断の振り返り） ===
