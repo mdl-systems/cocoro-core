@@ -1015,6 +1015,13 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
             await memory.short.add_message(session_id, "cocoro", full_response)
             await memory.long.save_message(session_id, "cocoro", full_response, emotion=dominant_emotion)
 
+            # 5b. 会話内容から感情を自動更新
+            try:
+                await personality.emotion.analyze_and_adjust(req.message)
+                await personality.emotion.analyze_and_adjust(full_response)
+            except Exception:
+                pass
+
             # 6. 自己観察
             try:
                 await observer.observe_conversation(session_id, req.message, full_response, dominant_emotion)
@@ -1336,13 +1343,19 @@ async def emotion_current(_=Depends(verify_api_key)):
 
 @app.get("/emotion/state")
 async def emotion_state(_=Depends(verify_api_key)):
-    """現在の感情状態を取得"""
+    """現在の感情状態を取得（description 付き強化版）"""
     state = await personality.emotion.get_state()
-    return state.to_dict()
+    d = state.to_dict()
+    d["description"] = state.description()
+    d["intensity"] = round(state.intensity(), 3)
+    return d
 
 @app.get("/emotion/history")
-async def emotion_history(limit: int = 20, _=Depends(verify_api_key)):
-    """感情変化の履歴"""
+async def emotion_history(limit: int = 20, days: int = 0, _=Depends(verify_api_key)):
+    """感情変化の履歴。days=7 で過去7日間のみ返す"""
+    if days > 0:
+        history = await personality.emotion.get_history_7days()
+        return {"history": history, "period_days": days, "count": len(history)}
     return {"history": await personality.emotion.get_history(limit)}
 
 class EmotionAdjustReq(BaseModel):

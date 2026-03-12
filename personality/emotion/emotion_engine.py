@@ -8,9 +8,8 @@
 感情は判断・応答の「色」を決める。
 """
 import json
-import math
 import logging
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict
 
 logger = logging.getLogger("cocoro.emotion")
 
@@ -26,7 +25,21 @@ EMOTION_LABEL_MAP: dict[str, dict[str, float]] = {
     "anxious":  {"fear": +0.20, "happiness": -0.05, "trust": -0.05, "sadness": +0.05},
 }
 
-# 減衰率: 各感情は中立値に向かって時間経過で戻る
+# テキスト内キーワード → 感情ラベルのマッピング（会話自動分析用）
+KEYWORD_EMOTION_MAP: list[tuple[list[str], str, float]] = [
+    (["ありがとう", "感謝", "助かった", "嬉しい", "良かった", "最高", "素晴らしい"], "grateful", 0.6),
+    (["楽しい", "面白い", "好き", "ポジティブ", "幸せ", "ハッピー"], "happy", 0.5),
+    (["すごい", "驚いた", "知らなかった", "初めて", "発見", "なるほど", "へえ"], "curious", 0.5),
+    (["悲しい", "つらい", "残念", "失敗", "ごめん", "申し訳"], "sad", 0.4),
+    (["怒り", "ムカつく", "ひどい", "最悪", "許せない", "嫌い", "批判"], "angry", 0.5),
+    (["不安", "心配", "怖い", "危険", "リスク", "問題", "困った"], "anxious", 0.4),
+    (["新しい", "実験", "試して", "不思議", "謎"], "curious", 0.4),
+]
+
+# trust キーワード（直接 trust パラメータを上昇させる）
+TRUST_KEYWORDS = ["信頼", "安心", "頼れる", "任せる", "大丈夫", "信じる", "よろしく"]
+
+# 中立値と減衰率
 NEUTRAL_VALUES = {
     "happiness": 0.5,
     "sadness": 0.1,
@@ -35,9 +48,29 @@ NEUTRAL_VALUES = {
     "trust": 0.6,
     "surprise": 0.2,
 }
-
-DECAY_RATE = 0.1  # 1回の減衰で中立方向に10%戻る
+DECAY_RATE = 0.1
 EMOTION_FIELDS = list(NEUTRAL_VALUES.keys())
+
+# 感情の日本語説明（/emotion/state の description フィールド用）
+MOOD_DESCRIPTIONS = {
+    "happiness": "前向きで明るい気分です。温かく、励ましを含んだ応答をします。",
+    "sadness":   "やや物静かで内省的な気分です。落ち着いた、共感のある応答をします。",
+    "anger":     "やや批判的で率直な視点を持っています。問題点を明確に指摘します。",
+    "fear":      "慎重で警戒的な心理状態です。リスクを考慮した応答をします。",
+    "trust":     "信頼感に溢れ協力的な気分です。チームワークを重視した応答をします。",
+    "surprise":  "好奇心旺盛で探究的な気分です。新しい発見を楽しんで応答します。",
+    "neutral":   "バランスのとれた冷静な状態です。",
+}
+
+MOOD_SHORT = {
+    "happiness": "前向きで明るい",
+    "sadness":   "物静かで内省的",
+    "anger":     "批判的で率直",
+    "fear":      "慎重で警戒的",
+    "trust":     "協力的で信頼感旺盛",
+    "surprise":  "好奇心旺盛で探究的",
+    "neutral":   "冷静でバランスが取れている",
+}
 
 
 @dataclass
@@ -51,21 +84,16 @@ class EmotionState:
     surprise: float = 0.2
 
     def dominant(self) -> str:
-        """最も強い感情を返す"""
-        # 中立値からの偏差が最大のものを支配的感情とする
+        """最も強い感情を返す（中立値からの偏差が最大のもの）"""
         max_delta = 0.0
         dominant = "neutral"
         for f in EMOTION_FIELDS:
             val = getattr(self, f)
-            neutral = NEUTRAL_VALUES[f]
-            delta = abs(val - neutral)
+            delta = abs(val - NEUTRAL_VALUES[f])
             if delta > max_delta:
                 max_delta = delta
                 dominant = f
-        # 偏差が小さすぎる場合は neutral
-        if max_delta < 0.15:
-            return "neutral"
-        return dominant
+        return "neutral" if max_delta < 0.15 else dominant
 
     def to_dict(self) -> dict:
         d = {k: round(v, 3) for k, v in asdict(self).items()}
@@ -76,6 +104,14 @@ class EmotionState:
         """感情の総強度 (0.0-1.0)"""
         total = sum(abs(getattr(self, f) - NEUTRAL_VALUES[f]) for f in EMOTION_FIELDS)
         return min(1.0, total / len(EMOTION_FIELDS))
+
+    def description(self) -> str:
+        """現在の感情状態の日本語説明"""
+        return MOOD_DESCRIPTIONS.get(self.dominant(), "バランスのとれた冷静な状態です。")
+
+    def short_mood(self) -> str:
+        """短い感情説明（system prompt 冒頭用）"""
+        return MOOD_SHORT.get(self.dominant(), "冷静でバランスが取れている")
 
 
 class EmotionEngine:
@@ -105,36 +141,71 @@ class EmotionEngine:
         return self._cache
 
     async def adjust(self, emotion_label: str, intensity: float = 1.0) -> dict:
-        """イベント（感情ラベル）に基づいて感情状態を変化させる
-
-        Args:
-            emotion_label: "happy", "sad", "angry" 等
-            intensity: 変化の強度倍率 (デフォルト1.0)
-
-        Returns:
-            {"before": {...}, "after": {...}, "adjustments": {...}}
-        """
+        """イベント（感情ラベル）に基づいて感情状態を変化させる"""
         state = await self.get_state()
         before = state.to_dict()
         adjustments = {}
 
-        # ラベルに対応する変化を適用
         deltas = EMOTION_LABEL_MAP.get(emotion_label, {})
         for field_name, delta in deltas.items():
             old_val = getattr(state, field_name)
             new_val = max(0.0, min(1.0, old_val + delta * intensity))
             setattr(state, field_name, new_val)
-            adjustments[field_name] = {"before": round(old_val, 3), "after": round(new_val, 3),
-                                       "delta": round(delta * intensity, 3)}
+            adjustments[field_name] = {
+                "before": round(old_val, 3),
+                "after": round(new_val, 3),
+                "delta": round(delta * intensity, 3),
+            }
 
         if adjustments:
             await self._save_state(state)
             await self._record_history(emotion_label, before, state.to_dict(), adjustments)
             logger.info(f"Emotion adjusted: {emotion_label} → dominant={state.dominant()}, "
-                       f"intensity={state.intensity():.2f}")
+                        f"intensity={state.intensity():.2f}")
 
-        return {"before": before, "after": state.to_dict(), "adjustments": adjustments,
-                "dominant": state.dominant()}
+        return {"before": before, "after": state.to_dict(),
+                "adjustments": adjustments, "dominant": state.dominant()}
+
+    async def analyze_and_adjust(self, text: str) -> str:
+        """会話テキストを分析して感情を自動更新する（ユーザー発言・AI応答両方に適用）。
+
+        Returns:
+            適用された感情ラベル（変化なしの場合 "neutral"）
+        """
+        if not text or len(text) < 2:
+            return "neutral"
+
+        # キーワードマッチで最強の感情を検出
+        detected_label = "neutral"
+        max_intensity = 0.0
+        for keywords, label, kw_intensity in KEYWORD_EMOTION_MAP:
+            for kw in keywords:
+                if kw in text:
+                    if kw_intensity > max_intensity:
+                        max_intensity = kw_intensity
+                        detected_label = label
+                    break
+
+        # trust キーワードは直接 trust を上昇
+        trust_hit = any(kw in text for kw in TRUST_KEYWORDS)
+        if trust_hit:
+            state = await self.get_state()
+            before = state.to_dict()
+            old_trust = state.trust
+            state.trust = min(1.0, state.trust + 0.08)
+            if abs(state.trust - old_trust) > 0.001:
+                await self._save_state(state)
+                await self._record_history(
+                    "trust_keyword", before, state.to_dict(),
+                    {"trust": {"before": round(old_trust, 3),
+                               "after": round(state.trust, 3), "delta": 0.08}},
+                )
+
+        if detected_label != "neutral" and max_intensity > 0:
+            await self.adjust(detected_label, intensity=max_intensity * 0.5)
+            return detected_label
+
+        return "neutral"
 
     async def decay(self) -> dict:
         """感情を中立値に向かって減衰させる（時間経過シミュレーション）"""
@@ -147,9 +218,7 @@ class EmotionEngine:
             neutral = NEUTRAL_VALUES[f]
             if abs(current - neutral) < 0.01:
                 continue
-            # 中立に向かって DECAY_RATE 分だけ戻す
-            new_val = current + (neutral - current) * DECAY_RATE
-            new_val = max(0.0, min(1.0, new_val))
+            new_val = max(0.0, min(1.0, current + (neutral - current) * DECAY_RATE))
             setattr(state, f, new_val)
             adjustments[f] = {"before": round(current, 3), "after": round(new_val, 3)}
 
@@ -160,35 +229,11 @@ class EmotionEngine:
         return {"before": before, "after": state.to_dict(), "decayed": len(adjustments)}
 
     async def to_prompt(self) -> str:
-        """感情状態をプロンプト文に変換"""
+        """感情状態をプロンプト文に変換（system prompt 冒頭に付加する 1 行）"""
         state = await self.get_state()
-        dominant = state.dominant()
-        intensity = state.intensity()
-
-        if intensity < 0.1:
-            return "【感情状態】平静（安定）"
-
-        # 感情の強さをバーで表現
-        lines = ["【感情状態】"]
-        for f in EMOTION_FIELDS:
-            val = getattr(state, f)
-            bar = "█" * int(val * 10)
-            if val > 0.3 or f == dominant:
-                lines.append(f"  {f}: {bar} ({val:.2f})")
-
-        mood_map = {
-            "happiness": "前向きで明るい",
-            "sadness": "やや物静かで内省的",
-            "anger": "やや批判的で厳しい",
-            "fear": "慎重で警戒的",
-            "trust": "信頼感に溢れ協力的",
-            "surprise": "好奇心旺盛で探究的",
-            "neutral": "バランスのとれた冷静さ",
-        }
-        lines.append(f"  → 今のムード: {mood_map.get(dominant, '平静')}")
-        lines.append(f"  → 感情強度: {intensity:.0%}")
-
-        return "\n".join(lines)
+        if state.intensity() < 0.1:
+            return "【現在の気分】冷静でバランスが取れている"
+        return f"【現在の気分】{state.short_mood()}（{state.dominant()}・強度{state.intensity():.0%}）"
 
     async def get_history(self, limit: int = 20) -> list[dict]:
         """感情変化の履歴"""
@@ -197,16 +242,25 @@ class EmotionEngine:
             "FROM emotion_history ORDER BY created_at DESC LIMIT $1", limit)
         return [dict(r) for r in rows]
 
+    async def get_history_7days(self) -> list[dict]:
+        """過去7日間の感情変化履歴"""
+        rows = await self.db.fetch(
+            "SELECT trigger_event, before_state, after_state, adjustments, created_at "
+            "FROM emotion_history "
+            "WHERE created_at >= NOW() - INTERVAL '7 days' "
+            "ORDER BY created_at DESC LIMIT 500"
+        )
+        return [dict(r) for r in rows]
+
     async def _save_state(self, state: EmotionState):
         """DBに感情状態を保存"""
-        dominant = state.dominant()
         await self.db.execute(
             "UPDATE emotion_state SET "
             "happiness=$1, sadness=$2, anger=$3, fear=$4, trust=$5, surprise=$6, "
             "dominant_emotion=$7 "
             "WHERE id=(SELECT id FROM emotion_state LIMIT 1)",
             state.happiness, state.sadness, state.anger,
-            state.fear, state.trust, state.surprise, dominant)
+            state.fear, state.trust, state.surprise, state.dominant())
         self._cache = state
 
     async def _record_history(self, trigger: str, before: dict, after: dict, adjustments: dict):
