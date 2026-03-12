@@ -287,13 +287,13 @@ class BootWizard:
             "question": session.current_question(),
         }
 
-    def answer(self, session_id: str, answer_text: str) -> dict:
-        """質問に回答し、次の質問を取得"""
+    def answer(self, session_id: str, answer_text: str, question_id: str | None = None) -> dict:
+        """質問に回答し、次の質問を取得（question_id 指定で任意の問にジャンプ可能）"""
         session = self.sessions.get(session_id)
         if not session:
             return {"error": "Session not found"}
 
-        next_q = session.answer(answer_text)
+        next_q = session.answer(answer_text, question_id)
         result = {
             "session_id": session_id,
             "answered": len(session.answers),
