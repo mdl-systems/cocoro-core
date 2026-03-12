@@ -246,8 +246,18 @@ class SetupSession:
             **q,
         }
 
-    def answer(self, answer_text: str) -> dict | None:
-        if self.is_complete:
+    def answer(self, answer_text: str, question_id: str | None = None) -> dict | None:
+        if self.is_complete and question_id is None:
+            return None
+        # question_id 指定時はそのインデックスにジャンプ（戻る操作対応）
+        if question_id is not None:
+            target_index = next(
+                (i for i, q in enumerate(self.question_list) if q["id"] == question_id),
+                None
+            )
+            if target_index is not None:
+                self.current_index = target_index
+        if self.current_index >= len(self.question_list):
             return None
         q = self.question_list[self.current_index]
         self.answers[q["id"]] = answer_text

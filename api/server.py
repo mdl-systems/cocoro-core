@@ -1357,12 +1357,13 @@ async def setup_start(req: SetupStartReq = SetupStartReq(), _=Depends(verify_api
 
 class SetupAnswerReq(BaseModel):
     session_id: str
+    question_id: str | None = None  # 指定時はそのIDの質問にジャンプ（戻る操作対応）
     answer: str
 
 @app.post("/setup/answer")
 async def setup_answer(req: SetupAnswerReq, _=Depends(verify_api_key)):
-    """質問に回答"""
-    return boot_wizard.answer(req.session_id, req.answer)
+    """質問に回答（question_id 指定で任意の問にジャンプ可能）"""
+    return boot_wizard.answer(req.session_id, req.answer, req.question_id)
 
 @app.get("/setup/progress/{session_id}")
 async def setup_progress(session_id: str, _=Depends(verify_api_key)):
