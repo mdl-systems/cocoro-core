@@ -50,6 +50,7 @@ from personality.clone_engine import PersonalityCloneEngine
 from personality.emotion_adapter import EmotionBehaviorAdapter
 from memory.memory_archiver import MemoryArchiver
 from memory.user_memories import UserMemoryEngine
+from brain.multimodal import MultimodalEngine
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from brain.local_llm import LocalLLMManager
 from personality.multi_user import MultiUserManager
@@ -161,11 +162,12 @@ personality_profiles: dict = {}
 personality_learning_engine = None
 compat_engine = None
 user_memories = None
+multimodal: MultimodalEngine | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -178,6 +180,7 @@ async def lifespan(app: FastAPI):
     personality = PersonalityEngine(db_pool)
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
     user_memories = UserMemoryEngine(db_pool)
+    multimodal = MultimodalEngine()
     reasoning = ReasoningEngine(personality, memory)
     decision = DecisionGraph(personality, memory)
 
@@ -1241,6 +1244,67 @@ async def memory_add_manual(
         raise HTTPException(status_code=503, detail="Memory engine not ready")
     mem_id = await user_memories.add(topic, content, memory_type, confidence)
     return {"id": mem_id, "topic": topic, "type": memory_type}
+
+
+# ============================================================
+# 🎤 Voice & Screen Context (Gemini Multimodal)
+# ============================================================
+
+class VoiceTranscribeReq(BaseModel):
+    audio_base64: str          # base64エンコードされた音声データ
+    language: str = "ja"       # 言語コード（デフォルト日本語）
+    audio_format: str = "wav"  # 音声フォーマット
+
+
+class ContextAnalyzeReq(BaseModel):
+    image_base64: str                                    # base64エンコードされた画像データ
+    question: str = "この画面について説明してください。"    # 解析の質問
+    image_format: str = "png"                            # 画像フォーマット
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(req: VoiceTranscribeReq, _=Depends(verify_api_key)):
+    """音声データをテキストに転写する。
+    
+    Gemini のネイティブ Audio 対応を使用。
+    対応フォーマット: wav, mp3, ogg, webm, flac, aac, m4a
+    """
+    if multimodal is None:
+        raise HTTPException(status_code=503, detail="Multimodal engine not ready")
+    try:
+        result = await multimodal.transcribe_audio(
+            req.audio_base64,
+            language=req.language,
+            audio_format=req.audio_format,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/context/analyze")
+async def context_analyze(req: ContextAnalyzeReq, _=Depends(verify_api_key)):
+    """画面キャプチャや画像を解析して提案を返す。
+    
+    Perplexity の「画面コンテキスト認識」相当の機能。
+    Gemini Vision API を使用。
+    対応フォーマット: png, jpg, jpeg, gif, webp, bmp
+    """
+    if multimodal is None:
+        raise HTTPException(status_code=503, detail="Multimodal engine not ready")
+    try:
+        result = await multimodal.analyze_image(
+            req.image_base64,
+            question=req.question,
+            image_format=req.image_format,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # === Decision Outcome（判断の振り返り） ===
