@@ -2,7 +2,6 @@
 人格の核。「私は誰か」を定義する。
 """
 import logging
-from typing import Optional
 
 logger = logging.getLogger("cocoro.identity")
 
@@ -12,15 +11,13 @@ class IdentityEngine:
 
     def __init__(self, db):
         self.db = db
-        self._cache = None
+        # NOTE: キャッシュなし — 常にDBから最新を読む
+        # （boot_wizard更新後に古いデータが残る問題を防ぐ）
 
     async def get(self) -> dict:
-        """現在のアイデンティティを取得"""
-        if self._cache:
-            return self._cache
+        """現在のアイデンティティを取得（常にDBから最新を読む）"""
         row = await self.db.fetchrow("SELECT * FROM identity LIMIT 1")
-        self._cache = dict(row) if row else {"owner_name": "Unknown", "profile": "", "philosophy": ""}
-        return self._cache
+        return dict(row) if row else {"owner_name": "Unknown", "profile": "", "philosophy": ""}
 
     async def update(self, **kwargs) -> dict:
         """アイデンティティを更新"""
@@ -36,7 +33,6 @@ class IdentityEngine:
             await self.db.execute(
                 f"UPDATE identity SET {','.join(sets)} WHERE id=${i}::uuid", *params
             )
-            self._cache = None
             logger.info(f"Identity updated: {list(kwargs.keys())}")
         return await self.get()
 

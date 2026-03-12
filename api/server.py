@@ -692,7 +692,63 @@ async def health():
     return {"status": "ok", "version": "1.0.0", "llm": llm_status}
 
 
-# === Chat (メイン対話) ===
+@app.post("/admin/reset-memory")
+async def reset_memory(_=Depends(verify_api_key)):
+    """全メモリテーブルをTRUNCATE（田中太郎問題など汚染データを完全クリア）
+    人格データ（identity/values_system/beliefs/goals）は保持する。
+    """
+    tables = [
+        "conversation_log", "thought_log", "decision_log",
+        "learning_log", "knowledge_store", "knowledge_base",
+        "self_observations", "improvement_plans", "emotion_history",
+        "sync_rate_history", "tool_usage_log", "tasks",
+        "task_delegations", "governance_log", "skills",
+    ]
+    truncated = []
+    errors = []
+    for tbl in tables:
+        try:
+            await db_pool.execute(f"TRUNCATE TABLE {tbl} CASCADE")
+            truncated.append(tbl)
+        except Exception as e:
+            errors.append({"table": tbl, "error": str(e)})
+
+    # emotion_state を初期値にリセット
+    try:
+        await db_pool.execute(
+            """UPDATE emotion_state SET
+               happiness=0.5, sadness=0.1, anger=0.0, fear=0.1,
+               trust=0.6, surprise=0.2, dominant_emotion='neutral',
+               updated_at=NOW()"""
+        )
+    except Exception as e:
+        errors.append({"table": "emotion_state", "error": str(e)})
+
+    logger.info(f"Admin: reset-memory executed. truncated={truncated}")
+    return {
+        "status": "ok",
+        "truncated": truncated,
+        "errors": errors,
+        "message": "メモリテーブルをリセットしました。人格データは保持されています。",
+    }
+
+
+@app.get("/debug/system-prompt")
+async def debug_system_prompt(_=Depends(verify_api_key)):
+    """デバッグ用: LLMに渡すシステムプロンプトを返す（田中太郎問題調査用）"""
+    system_prompt = await personality.build_system_prompt()
+    identity_data = await personality.identity.get()
+    return {
+        "identity_in_db": {
+            "owner_name": identity_data.get("owner_name"),
+            "profile":    identity_data.get("profile", "")[:100],
+        },
+        "system_prompt": system_prompt,
+        "system_prompt_length": len(system_prompt),
+    }
+
+
+
 class ChatReq(BaseModel):
     message: str
     session_id: str | None = None
