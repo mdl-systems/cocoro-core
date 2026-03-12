@@ -440,8 +440,10 @@ app.add_middleware(
 # === D-10: Security Middleware ===
 from api.security import SecurityMiddleware, ip_filter, login_throttle, rate_limiter
 from api.routes.agent_roles import router as agent_roles_router, get_role_system_prompt
+from api.routes.nodes import router as nodes_router, find_node_for_role, forward_to_node
 
 app.include_router(agent_roles_router)
+app.include_router(nodes_router)
 
 # IP Filter 設定
 ip_filter.configure(
@@ -873,6 +875,18 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
         try:
             # 即座にキープアライブを送信（クライアントのタイムアウト防止）
             yield ": ping\n\n"
+
+            # role_id が指定されている場合、リモートノードへ転送する
+            if req.role_id:
+                remote_node = await find_node_for_role(db_pool, req.role_id)
+                if remote_node:
+                    logger.info(
+                        f"[{session_id[:8]}] Forwarding role={req.role_id} "
+                        f"to node {remote_node['node_id']} ({remote_node['ip']}:{remote_node['port']})"
+                    )
+                    async for chunk in forward_to_node(remote_node, req.message, session_id, req.role_id):
+                        yield chunk
+                    return
 
             # 1. ユーザーメッセージを記憶
             await memory.short.add_message(session_id, "user", req.message)

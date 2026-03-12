@@ -60,6 +60,26 @@ MIGRATIONS = [
                 ON self_observations (impact_score DESC);
         """,
     },
+    {
+        "version": 5,
+        "name": "add_cocoro_nodes_table",
+        "description": "複数miniPC対応: ノード登録・発見テーブル",
+        "sql": """
+            CREATE TABLE IF NOT EXISTS cocoro_nodes (
+                node_id       TEXT PRIMARY KEY,
+                name          TEXT NOT NULL DEFAULT '',
+                ip            TEXT NOT NULL,
+                port          INTEGER NOT NULL DEFAULT 8001,
+                roles         TEXT[] DEFAULT '{}',
+                status        TEXT DEFAULT 'unknown',
+                last_seen     TIMESTAMPTZ,
+                registered_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at    TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_nodes_status
+                ON cocoro_nodes (status);
+        """,
+    },
 ]
 
 
