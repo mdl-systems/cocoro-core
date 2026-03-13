@@ -438,8 +438,113 @@ async def _memory_archive_scheduler(interval_hours: int):
         except Exception as e:
             logger.error(f"[Scheduler] Memory archive failed: {e}")
 
-app = FastAPI(title="cocoro-core", version="1.0.0",
-              description="Personality AI Operating System", lifespan=lifespan)
+import time as _time
+
+# === OpenAPI タグ定義 ===
+OPENAPI_TAGS = [
+    {"name": "health",      "description": "ヘルスチェック・システム状態"},
+    {"name": "chat",        "description": "会話・チャットストリーミング"},
+    {"name": "setup",       "description": "Boot Wizard・初期設定"},
+    {"name": "memory",      "description": "記憶管理（短期・長期・ベクトル）"},
+    {"name": "emotion",     "description": "感情状態・感情履歴"},
+    {"name": "sync",        "description": "シンクロ率（ユーザー↔AI一致度）"},
+    {"name": "think",       "description": "自律思考・デイリーブリーフィング"},
+    {"name": "personality", "description": "人格・価値観・信念・目標"},
+    {"name": "growth",      "description": "成長トラッカー・シンクロ率履歴"},
+    {"name": "agent",       "description": "エージェントロール・タスク実行"},
+    {"name": "node",        "description": "分散ノード登録・ヘルス確認"},
+    {"name": "voice",       "description": "音声転写・スクリーンコンテキスト分析"},
+    {"name": "admin",       "description": "管理者操作（メモリリセット等）"},
+    {"name": "debug",       "description": "デバッグ・システム内部確認"},
+    {"name": "scheduler",   "description": "スケジューラ管理・手動トリガー"},
+]
+
+OPENAPI_DESCRIPTION = """
+# cocoro-core API
+
+**Personality AI Operating System** のコアエンジン REST API です。
+
+## 認証
+
+すべてのエンドポイント（`/health` を除く）は **Bearer Token** 認証が必要です:
+
+```
+Authorization: Bearer <COCORO_API_KEY>
+```
+
+Swagger UI の **🔒 Authorize** ボタンからトークンを設定できます。
+
+## アーキテクチャ（11層構造）
+
+| Layer | 役割 |
+|-------|------|
+| Memory | 短期(Redis) / 長期(PostgreSQL) / ベクトル(pgvector) |
+| Values | 価値観ベクトル + 理想との余弦類似度 |
+| Emotion | 6次元感情モデル (happiness / sadness / anger / fear / trust / surprise) |
+| Decision | Reasoning → Values → Emotion → Decision の順序付きパイプライン |
+| Sync Rate | ユーザー↔AI シンクロ率 (0–100%, Divergence Ceiling=92%) |
+
+## シンクロ率の学習制御
+
+| シンクロ率 | 学習率 |
+|---|---|
+| < 70% | 加速 (1.5x) |
+| 70–85% | 通常 (1.0x) |
+| 85–92% | 減速 (0.3x / Creative Friction) |
+| > 92% | 停止 (Divergence Ceiling) |
+"""
+
+app = FastAPI(
+    title="cocoro-core",
+    version="1.0.0",
+    description=OPENAPI_DESCRIPTION,
+    summary="Personality AI Operating System — Core API",
+    contact={
+        "name": "MDL Systems",
+        "url": "https://github.com/mdl-systems/cocoro-core",
+    },
+    license_info={
+        "name": "AGPL-3.0",
+        "url": "https://www.gnu.org/licenses/agpl-3.0.html",
+    },
+    openapi_tags=OPENAPI_TAGS,
+    swagger_ui_parameters={
+        "defaultModelsExpandDepth": -1,
+        "docExpansion": "none",
+        "filter": True,
+        "tagsSorter": "alpha",
+    },
+    lifespan=lifespan,
+)
+
+# Swagger UI に Bearer 認証ボタンを追加
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+        tags=OPENAPI_TAGS,
+    )
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "API Key",
+            "description": "COCORO_API_KEY を入力してください",
+        }
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+app.openapi = custom_openapi  # type: ignore
+
+# アプリ起動時刻を記録（uptime計算用）
+_APP_START_TIME = _time.time()
 
 # === A-4: CORS Middleware ===
 cors_origins = settings.CORS_ORIGINS
@@ -705,10 +810,77 @@ async def scheduler_trigger(name: str, _=Depends(verify_api_key)):
 
 
 # === Health (認証不要) ===
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["health"],
+    summary="ヘルスチェック",
+    response_description="システムの状態・バージョン・各サービスの接続状況",
+    responses={
+        200: {"description": "正常稼働中"},
+        503: {"description": "サービス利用不可"},
+    },
+)
 async def health():
-    llm_status = await llm.health()
-    return {"status": "ok", "version": "1.0.0", "llm": llm_status}
+    """システムヘルスチェックエンドポイント。
+
+    PostgreSQL / Redis / LLM の接続状態と、
+    サーバー起動からの経過秒数（uptime）を返します。
+    このエンドポイントは認証不要でアクセスできます。
+    """
+    # LLM ステータス
+    try:
+        llm_status = await llm.health()
+        llm_ok = "ok"
+        llm_model = llm_status.get("model", os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"))
+    except Exception:
+        llm_ok = "error"
+        llm_model = os.getenv("GEMINI_MODEL", "unknown")
+
+    # PostgreSQL ステータス
+    pg_status = "unknown"
+    try:
+        if db_pool:
+            await db_pool.fetchval("SELECT 1")
+            pg_status = "connected"
+        else:
+            pg_status = "not_initialized"
+    except Exception:
+        pg_status = "error"
+
+    # Redis ステータス（メモリエンジン経由）
+    redis_status = "unknown"
+    try:
+        if memory and hasattr(memory, 'short') and hasattr(memory.short, 'redis'):
+            r = memory.short.redis
+            if r:
+                await r.ping()
+                redis_status = "connected"
+            else:
+                redis_status = "not_initialized"
+        else:
+            redis_status = "not_initialized"
+    except Exception:
+        redis_status = "unavailable"
+
+    # エンドポイント数 (routes数)
+    endpoints_count = sum(
+        1 for r in app.routes
+        if hasattr(r, "methods") and r.methods  # type: ignore
+    )
+
+    uptime_seconds = int(_time.time() - _APP_START_TIME)
+
+    return {
+        "status": "healthy" if (pg_status == "connected" and llm_ok == "ok") else "degraded",
+        "version": "1.0.0",
+        "uptime_seconds": uptime_seconds,
+        "services": {
+            "postgres": pg_status,
+            "redis": redis_status,
+            "llm": f"{llm_ok} ({llm_model})",
+        },
+        "endpoints_count": endpoints_count,
+    }
 
 
 @app.post("/admin/reset-memory")
