@@ -587,12 +587,14 @@ from api.routes.nodes import router as nodes_router, find_node_for_role, forward
 from api.routes.public import router as public_router
 from api.routes.admin_keys import router as admin_keys_router
 from api.routes.notify import router as notify_router
+from api.routes.language_settings import router as language_settings_router
 
 app.include_router(agent_roles_router)
 app.include_router(nodes_router)
 app.include_router(public_router)
 app.include_router(admin_keys_router)
 app.include_router(notify_router)
+app.include_router(language_settings_router)
 
 # IP Filter 設定
 ip_filter.configure(
@@ -1916,11 +1918,22 @@ async def governance_check(req: GovernanceCheckReq, _=Depends(verify_api_key)):
 # === Setup (人格形成) ===
 class SetupStartReq(BaseModel):
     mode: str = "boot"  # "boot" (40問) or "deep" (80問)
+    lang: str = "ja"   # ja / en / zh
 
-@app.post("/setup/start")
+@app.post("/setup/start",
+          summary="人格形成ウィザード開始",
+          description="""Boot Wizardセッションを開始します。
+
+**langパラメータ:**
+- `ja` — 日本語 (default)
+- `en` — English
+- `zh` — 中文
+
+`GET /setup/start?lang=en` でURLパラメータ指定も可能。""",
+          tags=["setup"])
 async def setup_start(req: SetupStartReq = SetupStartReq(), _=Depends(verify_api_key)):
     """人格形成セッションを開始"""
-    return boot_wizard.start_session(req.mode)
+    return boot_wizard.start_session(req.mode, lang=req.lang)
 
 class SetupAnswerReq(BaseModel):
     session_id: str
