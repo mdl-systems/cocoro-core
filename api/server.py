@@ -52,6 +52,7 @@ from memory.memory_archiver import MemoryArchiver
 from memory.user_memories import UserMemoryEngine
 from brain.multimodal import MultimodalEngine
 from brain.autonomous_thinker import AutonomousThinker
+from personality.sync_engine import SyncRateEngine
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from brain.local_llm import LocalLLMManager
 from personality.multi_user import MultiUserManager
@@ -165,11 +166,12 @@ compat_engine = None
 user_memories = None
 multimodal: MultimodalEngine | None = None
 auto_thinker: AutonomousThinker | None = None
+sync_engine: SyncRateEngine | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker, sync_engine
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -184,6 +186,7 @@ async def lifespan(app: FastAPI):
     user_memories = UserMemoryEngine(db_pool)
     multimodal = MultimodalEngine()
     auto_thinker = AutonomousThinker(db_pool, llm, personality, memory)
+    sync_engine = SyncRateEngine(db_pool, growth_tracker=growth)
     reasoning = ReasoningEngine(personality, memory)
     decision = DecisionGraph(personality, memory)
 
@@ -1319,6 +1322,51 @@ async def brief_daily_generate(_=Depends(verify_api_key)):
         return result
     except Exception as e:
         logger.error(f"Daily briefing generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# 📊 Sync Rate (シンクロ率)
+# ============================================================
+
+@app.get("/sync/rate")
+async def sync_rate_get(_=Depends(verify_api_key)):
+    """現在の4要素シンクロ率を返す。
+
+    計算要素（重み）:
+      - values_match   (40%): 価値観ベクトルの余弦類似度
+      - empathy        (30%): 会話の共感度
+      - emotion_stab   (20%): 感情状態の安定度
+      - memory_usage   (10%): 記憶の活用度
+    """
+    if sync_engine is None:
+        raise HTTPException(status_code=503, detail="SyncEngine not ready")
+    try:
+        result = await sync_engine.compute_full_sync_rate(save=True)
+        return result
+    except Exception as e:
+        logger.error(f"Sync rate compute failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/sync/history")
+async def sync_rate_history(days: int = 30, _=Depends(verify_api_key)):
+    """過去n日間のシンクロ率推移を返す。
+
+    Args:
+        days: 取得する日数（デフォルト30日）
+    """
+    if sync_engine is None:
+        raise HTTPException(status_code=503, detail="SyncEngine not ready")
+    try:
+        history = await sync_engine.get_history(days=days)
+        return {
+            "days": days,
+            "count": len(history),
+            "history": history,
+        }
+    except Exception as e:
+        logger.error(f"Sync history fetch failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
