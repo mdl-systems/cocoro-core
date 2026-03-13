@@ -168,12 +168,18 @@ multimodal: MultimodalEngine | None = None
 auto_thinker: AutonomousThinker | None = None
 sync_engine: SyncRateEngine | None = None
 email_engine = None
+audit_logger = None  # SecurityMiddlewareの監査ロガー
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker, sync_engine, email_engine
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker, sync_engine, email_engine, audit_logger
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
+
+    # 監査ロガーをDBプールに接続
+    from api.security_middleware import audit_logger as _audit_logger
+    audit_logger = _audit_logger
+    audit_logger.set_pool(db_pool)
 
     # A-5: 自動マイグレーション
     migration_runner = MigrationRunner(db_pool)
@@ -588,6 +594,7 @@ from api.routes.public import router as public_router
 from api.routes.admin_keys import router as admin_keys_router
 from api.routes.notify import router as notify_router
 from api.routes.language_settings import router as language_settings_router
+from api.routes.admin_security import router as admin_security_router
 
 app.include_router(agent_roles_router)
 app.include_router(nodes_router)
@@ -595,6 +602,29 @@ app.include_router(public_router)
 app.include_router(admin_keys_router)
 app.include_router(notify_router)
 app.include_router(language_settings_router)
+app.include_router(admin_security_router)
+
+# SecurityMiddleware (監査ログ + IPフィルタ)
+from api.security_middleware import (
+    SecurityMiddleware, audit_logger as _sec_audit_logger,
+    RATE_LIMITING_AVAILABLE, limiter, get_ratelimit_handler,
+    get_client_ip,
+)
+if settings.ENABLE_IP_FILTER or settings.AUDIT_LOG_ENABLED:
+    app.add_middleware(
+        SecurityMiddleware,
+        audit_logger=_sec_audit_logger,
+        enable_ip_filter=settings.ENABLE_IP_FILTER,
+    )
+    logger.info(f"SecurityMiddleware enabled: ip_filter={settings.ENABLE_IP_FILTER} audit={settings.AUDIT_LOG_ENABLED}")
+
+# slowapi レートリミッター
+if RATE_LIMITING_AVAILABLE and settings.RATE_LIMIT_ENABLED:
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    logger.info("slowapi rate limiting enabled")
 
 # IP Filter 設定
 ip_filter.configure(

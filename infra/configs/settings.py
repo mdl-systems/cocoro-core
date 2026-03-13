@@ -48,13 +48,22 @@ class Settings:
     FROM_EMAIL: str = os.getenv("FROM_EMAIL", "noreply@cocoro.ai")
     EMAIL_ENABLED: bool = os.getenv("RESEND_API_KEY", "") != ""  # キーが設定されているか
 
-    # === Security (D-10) ===
+    # === Security ===
     IP_WHITELIST: str = os.getenv("IP_WHITELIST", "")  # カンマ区切り。空=全許可
     IP_BLACKLIST: str = os.getenv("IP_BLACKLIST", "")  # カンマ区切り。空=ブロックなし
+    # 外部リクエスト允許ネットワーク (セキュリティミドルウェア用)
+    ALLOWED_IPS: str = os.getenv("ALLOWED_IPS", "127.0.0.1,192.168.0.0/16,172.16.0.0/12,10.0.0.0/8")
+    ENABLE_IP_FILTER: bool = os.getenv("ENABLE_IP_FILTER", "true").lower() in ("true", "1", "yes")
     FORCE_HTTPS: bool = os.getenv("FORCE_HTTPS", "false").lower() in ("true", "1", "yes")
     RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("true", "1", "yes")
     LOGIN_MAX_FAILURES: int = int(os.getenv("LOGIN_MAX_FAILURES", "10"))
     LOGIN_LOCKOUT_SECONDS: int = int(os.getenv("LOGIN_LOCKOUT_SECONDS", "300"))
+    API_KEY_GRACE_HOURS: int = int(os.getenv("API_KEY_GRACE_HOURS", "24"))  # ローテーション後旧キー有効時間
+    AUDIT_LOG_ENABLED: bool = os.getenv("AUDIT_LOG_ENABLED", "true").lower() in ("true", "1", "yes")
+
+    # === SSL / HTTPS ===
+    SSL_CERT_PATH: str = os.getenv("SSL_CERT_PATH", "")  # 空=Cloudflare Tunnel用の場合不要
+    SSL_KEY_PATH: str = os.getenv("SSL_KEY_PATH", "")
 
     @property
     def database_url(self) -> str:
