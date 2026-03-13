@@ -51,6 +51,7 @@ from personality.emotion_adapter import EmotionBehaviorAdapter
 from memory.memory_archiver import MemoryArchiver
 from memory.user_memories import UserMemoryEngine
 from brain.multimodal import MultimodalEngine
+from brain.autonomous_thinker import AutonomousThinker
 from brain.tools.plugin_system import PluginRegistry, register_builtin_plugins
 from brain.local_llm import LocalLLMManager
 from personality.multi_user import MultiUserManager
@@ -163,11 +164,12 @@ personality_learning_engine = None
 compat_engine = None
 user_memories = None
 multimodal: MultimodalEngine | None = None
+auto_thinker: AutonomousThinker | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -181,6 +183,7 @@ async def lifespan(app: FastAPI):
     memory = MemoryEngine(db_pool, settings.REDIS_URL)
     user_memories = UserMemoryEngine(db_pool)
     multimodal = MultimodalEngine()
+    auto_thinker = AutonomousThinker(db_pool, llm, personality, memory)
     reasoning = ReasoningEngine(personality, memory)
     decision = DecisionGraph(personality, memory)
 
@@ -312,6 +315,13 @@ async def lifespan(app: FastAPI):
         scheduler_tasks.append(asyncio.create_task(
             _memory_archive_scheduler(archive_interval)))
         logger.info(f"Scheduler: memory archive every {archive_interval}h")
+
+    # 自律思考（1時間ごとデフォルト）
+    think_interval = int(os.getenv("AUTO_THINK_INTERVAL_HOURS", "1"))
+    if think_interval > 0 and auto_thinker is not None:
+        scheduler_tasks.append(asyncio.create_task(
+            auto_thinker.run_hourly_scheduler(think_interval)))
+        logger.info(f"Scheduler: autonomous thinking every {think_interval}h")
 
     logger.info("=== cocoro-core started ===")
     yield
@@ -1244,6 +1254,72 @@ async def memory_add_manual(
         raise HTTPException(status_code=503, detail="Memory engine not ready")
     mem_id = await user_memories.add(topic, content, memory_type, confidence)
     return {"id": mem_id, "topic": topic, "type": memory_type}
+
+
+# ============================================================
+# 🧠 Autonomous Thinking & Daily Briefing
+# ============================================================
+
+@app.post("/think/start")
+async def think_start(_=Depends(verify_api_key)):
+    """自律思考セッションを今すぐ開始する。
+
+    直近の会話・記憶・感情状態を振り返り、
+    洞察をthought_logに保存して返す。
+    """
+    if auto_thinker is None:
+        raise HTTPException(status_code=503, detail="AutonomousThinker not ready")
+    try:
+        result = await auto_thinker.run_thinking_session()
+        return result
+    except Exception as e:
+        logger.error(f"Think session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/think/insights")
+async def think_insights(limit: int = 10, _=Depends(verify_api_key)):
+    """最新の自律思考から洞察一覧を返す。
+
+    Args:
+        limit: 返す洞察の最大件数（デフォルト10）
+    """
+    if auto_thinker is None:
+        raise HTTPException(status_code=503, detail="AutonomousThinker not ready")
+    insights = await auto_thinker.get_latest_insights(limit=limit)
+    return {
+        "insights": insights,
+        "count": len(insights),
+    }
+
+
+@app.get("/brief/daily")
+async def brief_daily_get(date: str = None, _=Depends(verify_api_key)):
+    """保存済みデイリーブリーフィングを返す。
+
+    Args:
+        date: YYYY-MM-DD形式（省略時は最新）
+    """
+    if auto_thinker is None:
+        raise HTTPException(status_code=503, detail="AutonomousThinker not ready")
+    brief = await auto_thinker.get_daily_briefing(date=date)
+    if not brief:
+        # なければ今すぐ生成
+        brief = await auto_thinker.generate_daily_briefing()
+    return brief
+
+
+@app.post("/brief/daily")
+async def brief_daily_generate(_=Depends(verify_api_key)):
+    """デイリーブリーフィングを今すぐ生成して保存・返却する。"""
+    if auto_thinker is None:
+        raise HTTPException(status_code=503, detail="AutonomousThinker not ready")
+    try:
+        result = await auto_thinker.generate_daily_briefing()
+        return result
+    except Exception as e:
+        logger.error(f"Daily briefing generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================
