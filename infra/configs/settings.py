@@ -43,6 +43,11 @@ class Settings:
     # === Webhook ===
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")  # Discord/Slack webhook
 
+    # === Email (Resend) ===
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    FROM_EMAIL: str = os.getenv("FROM_EMAIL", "noreply@cocoro.ai")
+    EMAIL_ENABLED: bool = os.getenv("RESEND_API_KEY", "") != ""  # キーが設定されているか
+
     # === Security (D-10) ===
     IP_WHITELIST: str = os.getenv("IP_WHITELIST", "")  # カンマ区切り。空=全許可
     IP_BLACKLIST: str = os.getenv("IP_BLACKLIST", "")  # カンマ区切り。空=ブロックなし

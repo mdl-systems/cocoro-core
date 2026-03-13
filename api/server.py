@@ -167,11 +167,12 @@ user_memories = None
 multimodal: MultimodalEngine | None = None
 auto_thinker: AutonomousThinker | None = None
 sync_engine: SyncRateEngine | None = None
+email_engine = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker, sync_engine
+    global db_pool, personality, memory, reasoning, decision, worker, consolidation, growth, task_queue, event_bus, org, tools, governance, boot_wizard, sampling, test_bench, observer, evaluator, improver, meta_cognition, value_scoring, intelligence, safety, cognitive, calibration, clone_engine, migration_runner, emotion_adapter, memory_archiver, plugin_registry, local_llm, user_manager, peer_comm, voice, ollama_test, integrations, templates, monitoring, i18n, personality_profiles, personality_learning_engine, compat_engine, user_memories, multimodal, auto_thinker, sync_engine, email_engine
     db_pool = await asyncpg.create_pool(settings.database_url, min_size=2, max_size=10)
 
     # A-5: 自動マイグレーション
@@ -325,6 +326,24 @@ async def lifespan(app: FastAPI):
         scheduler_tasks.append(asyncio.create_task(
             auto_thinker.run_hourly_scheduler(think_interval)))
         logger.info(f"Scheduler: autonomous thinking every {think_interval}h")
+
+    # メール通知エンジン初期化 (Resend)
+    try:
+        from agent.email_engine import EmailEngine
+        email_engine = EmailEngine(
+            db_pool=db_pool,
+            api_key=settings.RESEND_API_KEY,
+            from_email=settings.FROM_EMAIL,
+        )
+        # デイリーブリーフィング（毎朝9時）
+        daily_brief_hour = int(os.getenv("DAILY_BRIEF_HOUR", "9"))
+        if daily_brief_hour >= 0:
+            scheduler_tasks.append(asyncio.create_task(
+                email_engine.run_daily_brief_scheduler(daily_brief_hour)))
+            logger.info(f"Scheduler: daily brief at {daily_brief_hour}:00")
+        logger.info(f"Email engine: initialized (enabled={settings.EMAIL_ENABLED})")
+    except Exception as e:
+        logger.warning(f"Email engine init failed: {e}")
 
     logger.info("=== cocoro-core started ===")
     yield
@@ -567,11 +586,13 @@ from api.routes.agent_roles import router as agent_roles_router, get_role_system
 from api.routes.nodes import router as nodes_router, find_node_for_role, forward_to_node
 from api.routes.public import router as public_router
 from api.routes.admin_keys import router as admin_keys_router
+from api.routes.notify import router as notify_router
 
 app.include_router(agent_roles_router)
 app.include_router(nodes_router)
 app.include_router(public_router)
 app.include_router(admin_keys_router)
+app.include_router(notify_router)
 
 # IP Filter 設定
 ip_filter.configure(
