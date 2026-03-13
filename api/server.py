@@ -565,9 +565,13 @@ app.add_middleware(
 from api.security import SecurityMiddleware, ip_filter, login_throttle, rate_limiter
 from api.routes.agent_roles import router as agent_roles_router, get_role_system_prompt
 from api.routes.nodes import router as nodes_router, find_node_for_role, forward_to_node
+from api.routes.public import router as public_router
+from api.routes.admin_keys import router as admin_keys_router
 
 app.include_router(agent_roles_router)
 app.include_router(nodes_router)
+app.include_router(public_router)
+app.include_router(admin_keys_router)
 
 # IP Filter 設定
 ip_filter.configure(
