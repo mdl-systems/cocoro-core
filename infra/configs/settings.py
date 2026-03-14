@@ -65,6 +65,11 @@ class Settings:
     SSL_CERT_PATH: str = os.getenv("SSL_CERT_PATH", "")  # 空=Cloudflare Tunnel用の場合不要
     SSL_KEY_PATH: str = os.getenv("SSL_KEY_PATH", "")
 
+    # === Cloudflare Tunnel ===
+    TUNNEL_ENABLED: bool = os.getenv("TUNNEL_ENABLED", "false").lower() in ("true", "1", "yes")
+    TUNNEL_URL: str = os.getenv("TUNNEL_URL", "https://console.cocoro.ai")
+    LOCAL_URL: str = os.getenv("LOCAL_URL", "http://192.168.50.92")
+
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"

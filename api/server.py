@@ -937,6 +937,10 @@ async def health():
             "llm": f"{llm_ok} ({llm_model})",
         },
         "endpoints_count": endpoints_count,
+        # Cloudflare Tunnel 情報
+        "tunnel_enabled": settings.TUNNEL_ENABLED,
+        "tunnel_url": settings.TUNNEL_URL if settings.TUNNEL_ENABLED else None,
+        "local_url": settings.LOCAL_URL,
     }
 
 

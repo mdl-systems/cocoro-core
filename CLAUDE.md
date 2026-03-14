@@ -213,9 +213,15 @@ cocoro-core/
 
 | 日付 | 更新内容 |
 |------|---------|
+| 2026-03-14 | Cloudflare Tunnel セットアップスクリプト追加 (`scripts/setup-tunnel.sh`) |
+| 2026-03-14 | 本番用 `docker-compose.prod.yml` 追加（FORCE_HTTPS=true, リソース制限） |
+| 2026-03-14 | `/health` に `tunnel_enabled` / `tunnel_url` / `local_url` 追加 |
+| 2026-03-14 | `settings.py` に `TUNNEL_ENABLED` / `TUNNEL_URL` / `LOCAL_URL` 追加 |
+| 2026-03-14 | `CHANGELOG.md` 作成（v1.0.0 リリースノート） |
 | 2026-03-09 | クロスセッション記憶を `memory_engine.build_context()` に実装 |
 | 2026-03-09 | `/memory/search` `/memory/conversations` エンドポイント追加 |
 | 2026-03-09 | `/memory/stats` `/memory/archive` の `await` 抜け修正 |
 | 2026-03-09 | `.env.example` インラインコメントによる `IP_WHITELIST` バグ修正 |
 | 2026-03-09 | `nginx.conf` / `docker-compose.yml` に Nginx サービス追加 |
 | 2026-03-08 | 初版作成 |
+
