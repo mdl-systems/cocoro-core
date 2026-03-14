@@ -217,7 +217,7 @@ cocoro-core/
 | 2026-03-14 | 本番用 `docker-compose.prod.yml` 追加（FORCE_HTTPS=true, リソース制限） |
 | 2026-03-14 | `/health` に `tunnel_enabled` / `tunnel_url` / `local_url` 追加 |
 | 2026-03-14 | `settings.py` に `TUNNEL_ENABLED` / `TUNNEL_URL` / `LOCAL_URL` 追加 |
-| 2026-03-14 | `CHANGELOG.md` 作成（v1.0.0 リリースノート） |
+| 2026-03-14 | `CHANGELOG.md` 更新・`README.md` バッジ追加（v1.0.0 リリース準備完了） |
 | 2026-03-09 | クロスセッション記憶を `memory_engine.build_context()` に実装 |
 | 2026-03-09 | `/memory/search` `/memory/conversations` エンドポイント追加 |
 | 2026-03-09 | `/memory/stats` `/memory/archive` の `await` 抜け修正 |

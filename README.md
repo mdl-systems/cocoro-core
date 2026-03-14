@@ -1,5 +1,9 @@
 # cocoro-core 🧠
 
+![Version](https://img.shields.io/badge/version-1.0.0-pink)
+![Tests](https://img.shields.io/badge/tests-231%20passed-green)
+![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
+
 > **Personality AI Operating System** — AI に「人格」を与える OS
 
 Cocoro Core は LLM を**「声帯」**として扱い、人格の一貫性を **Memory + Values + Emotion + Decision Graph** で保証する AI OS です。

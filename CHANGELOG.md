@@ -1,4 +1,4 @@
-# Changelog — cocoro-core
+# Changelog
 
 すべての注目すべき変更はこのファイルに記載されます。  
 フォーマットは [Keep a Changelog](https://keepachangelog.com/ja/1.0.0/) に準拠し、  
@@ -6,16 +6,25 @@
 
 ---
 
-## [1.0.0] — 2026-03-14
-
-### 🎉 Initial Production Release
-
-Cocoro OS コアエンジンの最初の本番リリース。  
-Personality AI OS として、LLMを「声帯」として扱い、人格の一貫性を Memory + Values + Emotion + Decision Graph で保証します。
-
----
+## [1.0.0] - 2026-03-14
 
 ### Added
+
+- Boot Wizard (40問人格設定)
+- 6次元感情エンジン
+- シンクロ率システム（余弦類似度）
+- 10ツールFunction Calling
+- 専門職エージェントロール（6種）
+- ノード登録・発見API
+- 音声転写・画面コンテキスト分析API
+- Resendメール通知
+- Cloudflare Tunnel対応
+- セキュリティ強化（レート制限・IP Filter）
+- 多言語対応（日本語・英語・中文）
+- 131 APIエンドポイント
+- 231テスト
+
+### Details
 
 #### Core Architecture
 - **53 modules / 131 API endpoints / 24 DB tables / 231 tests**
@@ -45,21 +54,26 @@ Personality AI OS として、LLMを「声帯」として扱い、人格の一�
 #### Emotion Engine
 - 6次元感情モデル（happiness / sadness / anger / fear / trust / surprise）
 - 感情自然減衰スケジューラ
-- 感情→行動適応コンバーター
-
-#### Evolution System
-- 自己観察・自己評価・メタ認知エンジン
-- 価値スコアリング・知性拡張エンジン
-- 安全レイヤー
+- 感情→行動適応コンバーター（創造性 / リスク許容度 / 饒舌度 / 共感力）
 
 #### Agent System
+- 専門職エージェントロール（Dev / Sales / Marketing / Finance / Legal / HR）
 - タスクルーター + Worker Manager（2並列）
 - タスクキュー（Redis）+ イベントバス
 - 組織管理・部署・エージェントレジストリ
 - Webhook 通知（Discord/LINE 連携）
 - メール通知エンジン（Resend / デイリーブリーフィング）
 
-#### Security (D-10)
+#### Node API
+- ノード登録・発見 API（分散ノード管理）
+- `/{node_id}/health` 死活確認エンドポイント
+
+#### Voice & Multimodal
+- 音声転写 API（Web Speech API 連携）
+- 画面コンテキスト分析 API
+- 感情→音声パラメータ変換
+
+#### Security
 - レート制限（slowapi）
 - IP ホワイトリスト/ブラックリスト
 - API キーローテーション（graceful period 24h）
@@ -67,25 +81,22 @@ Personality AI OS として、LLMを「声帯」として扱い、人格の一�
 - JWT + API Key デュアル認証
 - ログイン試行制限・ロックアウト
 
-#### API & Infrastructure
+#### Cloudflare Tunnel
+- `scripts/setup-tunnel.sh`：自動セットアップスクリプト
+- `infra/docker/docker-compose.prod.yml`：本番設定（FORCE_HTTPS=true, LOG_LEVEL=WARNING, リソース制限）
+- `/health` に `tunnel_enabled` / `tunnel_url` / `local_url` フィールドを追加
+
+#### Internationalization
+- 多言語対応：日本語 / 英語 / 中文
+- `/language/settings` API
+
+#### Infrastructure
 - FastAPI 0.109 + Nginx リバースプロキシ
 - Docker Compose（開発 / 本番）
 - 自動データベースマイグレーション
 - JSON 構造化ログ（RotatingFileHandler / 50MB × 5世代）
 - OpenAPI / Swagger UI（Bearer認証ボタン付き）
 - `/health` ヘルスチェックエンドポイント（認証不要）
-
-#### Cloudflare Tunnel 対応（v1.0.0 新規）
-- `scripts/setup-tunnel.sh`：自動セットアップスクリプト
-- `infra/docker/docker-compose.prod.yml`：本番設定（FORCE_HTTPS=true, LOG_LEVEL=WARNING, リソース制限）
-- `/health` に `tunnel_enabled` / `tunnel_url` / `local_url` フィールドを追加
-- `Settings` に `TUNNEL_ENABLED` / `TUNNEL_URL` / `LOCAL_URL` を追加
-
-#### Dashboard
-- Web UI（ブラウザ対応）
-- Web Speech API 音声インターフェース
-
----
 
 ### Fixed
 
@@ -95,7 +106,7 @@ Personality AI OS として、LLMを「声帯」として扱い、人格の一�
 
 ---
 
-### Infrastructure
+### Tech Stack
 
 | Component | Version |
 |-----------|---------|
