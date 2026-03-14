@@ -604,19 +604,20 @@ app.include_router(notify_router)
 app.include_router(language_settings_router)
 app.include_router(admin_security_router)
 
-# SecurityMiddleware (監査ログ + IPフィルタ)
+# SecurityMiddleware (監査ログ + IPフィルタ) — api.security_middleware
 from api.security_middleware import (
-    SecurityMiddleware, audit_logger as _sec_audit_logger,
+    SecurityMiddleware as AuditSecurityMiddleware,
+    audit_logger as _sec_audit_logger,
     RATE_LIMITING_AVAILABLE, limiter, get_ratelimit_handler,
     get_client_ip,
 )
 if settings.ENABLE_IP_FILTER or settings.AUDIT_LOG_ENABLED:
     app.add_middleware(
-        SecurityMiddleware,
+        AuditSecurityMiddleware,
         audit_logger=_sec_audit_logger,
         enable_ip_filter=settings.ENABLE_IP_FILTER,
     )
-    logger.info(f"SecurityMiddleware enabled: ip_filter={settings.ENABLE_IP_FILTER} audit={settings.AUDIT_LOG_ENABLED}")
+    logger.info(f"SecurityMiddleware(audit) enabled: ip_filter={settings.ENABLE_IP_FILTER} audit={settings.AUDIT_LOG_ENABLED}")
 
 # slowapi レートリミッター
 if RATE_LIMITING_AVAILABLE and settings.RATE_LIMIT_ENABLED:
@@ -636,10 +637,11 @@ ip_filter.configure(
 login_throttle.max_failures = settings.LOGIN_MAX_FAILURES
 login_throttle.lockout_seconds = settings.LOGIN_LOCKOUT_SECONDS
 
-# Middleware 登録
+# SecurityMiddleware (HTTPS強制 + Rate Limit + Security Headers) — api.security
 if settings.RATE_LIMIT_ENABLED:
     app.add_middleware(SecurityMiddleware, force_https=settings.FORCE_HTTPS)
-    logger.info(f"Security middleware enabled (HTTPS={settings.FORCE_HTTPS}, IP whitelist={bool(settings.IP_WHITELIST)})")
+    logger.info(f"SecurityMiddleware(https) enabled (HTTPS={settings.FORCE_HTTPS}, IP whitelist={bool(settings.IP_WHITELIST)})")
+
 
 from fastapi.responses import JSONResponse
 import traceback as _tb
