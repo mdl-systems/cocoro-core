@@ -100,6 +100,7 @@ class SyncRateEngine:
 
         result = {
             "rate":      rate,
+            "sync_rate": rate,   # ダッシュボード互換エイリアス
             "trend":     trend,
             "delta":     round(delta, 1),
             "breakdown": breakdown,
