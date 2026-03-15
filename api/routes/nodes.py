@@ -308,3 +308,179 @@ async def forward_to_node(node: dict, message: str, session_id: str, role_id: st
             "action": "error", "emotion": {"dominant": "neutral"}
         })
         yield f"data: {final}\n\n"
+
+
+async def forward_task_to_agent(node: dict, message: str, session_id: str, role_id: str):
+    """
+    リモートノードの cocoro-agent (agent_port) にタスクを投入して
+    SSE ストリームを cocoro-core の /chat/stream 形式に変換して yield する。
+
+    フロー:
+      1. POST http://NODE_IP:{agent_port}/tasks  → task_id を取得
+      2. GET  http://NODE_IP:{agent_port}/tasks/{task_id}/stream (SSE) → 進捗を転送
+      3. GET  http://NODE_IP:{agent_port}/tasks/{task_id}/result → 最終結果を /chat/stream 形式で返す
+    """
+    import os
+    import json as _json
+
+    agent_port = node.get("agent_port", 8002)
+    base_url   = f"http://{node['ip']}:{agent_port}"
+    api_key    = os.getenv("COCORO_API_KEY", "")
+    headers    = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+    }
+
+    logger.info(
+        f"[AgentForward] node={node['node_id']} ({node['ip']}:{agent_port}) "
+        f"role={role_id} session={session_id[:8]}"
+    )
+
+    # ── Step1: タスク投入 ──────────────────────────────────────────────────
+    task_payload = {
+        "title":       message[:200],
+        "description": message,
+        "type":        "auto",
+        "role_id":     role_id,
+        "priority":    "normal",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{base_url}/tasks",
+                json=task_payload,
+                headers=headers,
+            )
+
+        if resp.status_code not in (200, 201):
+            err_text = resp.text[:300]
+            logger.error(f"[AgentForward] Task creation failed: HTTP {resp.status_code} — {err_text}")
+            yield f'data: {_json.dumps({"text": f"エージェントへのタスク投入に失敗しました (HTTP {resp.status_code})。"})}\n\n'
+            yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+            return
+
+        task_data = resp.json()
+        task_id   = task_data.get("task_id") or task_data.get("id")
+        if not task_id:
+            yield f'data: {_json.dumps({"text": "タスクIDが取得できませんでした。"})}\n\n'
+            yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+            return
+
+        logger.info(f"[AgentForward] Task submitted: task_id={task_id[:8]} → {node['node_id']}")
+        yield f'data: {_json.dumps({"text": f"[{role_id}エージェント] タスクを受け付けました。処理中..."})}\n\n'
+
+    except httpx.ConnectError:
+        # ノードをオフラインにマーク
+        try:
+            db = _get_db()
+            if db:
+                await _update_status(db, node["node_id"], False)
+        except Exception:
+            pass
+        _nid = node["node_id"]; _nip = node["ip"]
+        yield f'data: {_json.dumps({"text": f"ノード {_nid} ({_nip}) に接続できません。"})}\n\n'
+        yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+        return
+    except Exception as e:
+        yield f'data: {_json.dumps({"text": f"タスク投入エラー: {e}"})}\n\n'
+        yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+        return
+
+    # ── Step2: SSE進捗ストリームをプロキシ ────────────────────────────────
+    finished   = False
+    full_text  = ""
+    last_step  = ""
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "GET",
+                f"{base_url}/tasks/{task_id}/stream",
+                headers=headers,
+            ) as sse_resp:
+                async for raw_line in sse_resp.aiter_lines():
+                    # SSE "data: {...}" 行を解析
+                    if not raw_line.startswith("data:"):
+                        continue
+                    payload_str = raw_line[5:].strip()
+                    if not payload_str:
+                        continue
+
+                    try:
+                        event = _json.loads(payload_str)
+                    except Exception:
+                        continue
+
+                    event_type = event.get("event") or event.get("type", "")
+                    data       = event.get("data", event)
+
+                    if event_type in ("progress", "step"):
+                        step     = data.get("step") or data.get("current_step", "")
+                        progress = data.get("progress", 0)
+                        if step and step != last_step:
+                            last_step = step
+                            yield f'data: {_json.dumps({"text": f"[{progress}%] {step}"})}\n\n'
+
+                    elif event_type in ("tool_use", "tool"):
+                        tool = data.get("tool", "")
+                        yield f'data: {_json.dumps({"text": f"[ツール] {tool} を実行中..."})}\n\n'
+
+                    elif event_type in ("completed", "complete", "done"):
+                        finished = True
+                        result   = data.get("result") or data
+                        full_text = (
+                            result.get("full_response")
+                            or result.get("text")
+                            or result.get("summary")
+                            or _json.dumps(result, ensure_ascii=False)
+                            if isinstance(result, dict) else str(result)
+                        )
+                        break
+
+                    elif event_type == "error":
+                        error_msg = data.get("error") or data.get("message") or "エラーが発生しました"
+                        yield f'data: {_json.dumps({"text": f"エラー: {error_msg}"})}\n\n'
+                        yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "error", "emotion": {"dominant": "neutral"}})}\n\n'
+                        return
+
+    except (httpx.ReadTimeout, asyncio.TimeoutError):
+        logger.warning(f"[AgentForward] SSE stream timed out for task {task_id[:8]}, polling result...")
+        # タイムアウト時は直接結果を取得
+
+    # ── Step3: 結果を取得（SSEが終了したか、タイムアウしたとき） ──────────
+    if not finished or not full_text:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                result_resp = await client.get(
+                    f"{base_url}/tasks/{task_id}/result",
+                    headers=headers,
+                )
+            if result_resp.status_code == 200:
+                result_data = result_resp.json()
+                result_obj  = result_data.get("result") or result_data
+                full_text   = (
+                    result_obj.get("full_response")
+                    or result_obj.get("text")
+                    or result_obj.get("summary")
+                    or _json.dumps(result_obj, ensure_ascii=False)
+                    if isinstance(result_obj, dict) else str(result_obj)
+                )
+            elif result_resp.status_code == 202:
+                # まだ処理中
+                full_text = f"タスク ({task_id[:8]}) はまだ処理中です。`GET {base_url}/tasks/{task_id}/result` で結果を確認できます。"
+            else:
+                full_text = f"結果の取得に失敗しました (HTTP {result_resp.status_code})。task_id: {task_id}"
+        except Exception as e:
+            full_text = f"結果取得エラー: {e}。task_id: {task_id}"
+
+    # ── Step4: 最終テキストを /chat/stream 形式で返す ─────────────────────
+    if full_text:
+        # 長い結果はチャンクに分割して送信
+        CHUNK_SIZE = 500
+        for i in range(0, len(full_text), CHUNK_SIZE):
+            chunk = full_text[i:i + CHUNK_SIZE]
+            yield f'data: {_json.dumps({"text": chunk})}\n\n'
+
+    yield f'data: {_json.dumps({"type": "final", "sessionId": session_id, "action": "delegate", "emotion": {"dominant": "neutral"}, "task_id": task_id})}\n\n'
+

@@ -629,7 +629,7 @@ app.add_middleware(
 # === D-10: Security Middleware ===
 from api.security import SecurityMiddleware, ip_filter, login_throttle, rate_limiter
 from api.routes.agent_roles import router as agent_roles_router, get_role_system_prompt
-from api.routes.nodes import router as nodes_router, find_node_for_role, forward_to_node
+from api.routes.nodes import router as nodes_router, find_node_for_role, forward_to_node, forward_task_to_agent
 from api.routes.public import router as public_router
 from api.routes.admin_keys import router as admin_keys_router
 from api.routes.notify import router as notify_router
@@ -1230,12 +1230,28 @@ async def chat_stream(req: ChatReq, _=Depends(verify_api_key)):
             if req.role_id:
                 remote_node = await find_node_for_role(db_pool, req.role_id)
                 if remote_node:
-                    logger.info(
-                        f"[{session_id[:8]}] Forwarding role={req.role_id} "
-                        f"to node {remote_node['node_id']} ({remote_node['ip']}:{remote_node['port']})"
-                    )
-                    async for chunk in forward_to_node(remote_node, req.message, session_id, req.role_id):
-                        yield chunk
+                    # agent_port が設定されていれば cocoro-agent の /tasks に転送
+                    # 未設定なら cocoro-core の /chat/stream に転送（フォールバック）
+                    if remote_node.get("agent_port"):
+                        logger.info(
+                            f"[{session_id[:8]}] Routing role={req.role_id} "
+                            f"→ agent {remote_node['node_id']} "
+                            f"({remote_node['ip']}:{remote_node['agent_port']})"
+                        )
+                        async for chunk in forward_task_to_agent(
+                            remote_node, req.message, session_id, req.role_id
+                        ):
+                            yield chunk
+                    else:
+                        logger.info(
+                            f"[{session_id[:8]}] Forwarding role={req.role_id} "
+                            f"→ core {remote_node['node_id']} "
+                            f"({remote_node['ip']}:{remote_node['port']})"
+                        )
+                        async for chunk in forward_to_node(
+                            remote_node, req.message, session_id, req.role_id
+                        ):
+                            yield chunk
                     return
 
             # 1. ユーザーメッセージを記憶
