@@ -105,55 +105,108 @@ class UserMemoryEngine:
         return str(row["id"])
 
     async def list_all(self, memory_type: str = None, limit: int = 50) -> list[dict]:
-        """記憶一覧を取得"""
-        if memory_type:
-            rows = await self.db.fetch(
-                "SELECT id, topic, content, category, confidence, created_at "
-                "FROM knowledge_base WHERE source='user_memory' AND category=$1 "
-                "ORDER BY confidence DESC, created_at DESC LIMIT $2",
-                memory_type, limit
-            )
-        else:
-            rows = await self.db.fetch(
-                "SELECT id, topic, content, category, confidence, created_at "
-                "FROM knowledge_base WHERE source='user_memory' "
-                "ORDER BY confidence DESC, created_at DESC LIMIT $1",
-                limit
-            )
-        return [
-            {
-                "id": str(r["id"]),
-                "type": r["category"],
-                "type_label": MEMORY_TYPE_LABELS.get(r["category"], r["category"]),
-                "topic": r["topic"],
-                "content": r["content"],
-                "confidence": round(float(r["confidence"]), 2),
-                "created_at": str(r["created_at"])[:10],
-            }
-            for r in rows
-        ]
+        """記憶一覧を取得。categoryカラムが存在しない旧DBにも対応。"""
+        try:
+            if memory_type:
+                rows = await self.db.fetch(
+                    "SELECT id, topic, content, category, confidence, created_at "
+                    "FROM knowledge_base WHERE source='user_memory' AND category=$1 "
+                    "ORDER BY confidence DESC, created_at DESC LIMIT $2",
+                    memory_type, limit
+                )
+            else:
+                rows = await self.db.fetch(
+                    "SELECT id, topic, content, category, confidence, created_at "
+                    "FROM knowledge_base WHERE source='user_memory' "
+                    "ORDER BY confidence DESC, created_at DESC LIMIT $1",
+                    limit
+                )
+            return [
+                {
+                    "id": str(r["id"]),
+                    "type": r["category"],
+                    "type_label": MEMORY_TYPE_LABELS.get(r["category"], r["category"]),
+                    "topic": r["topic"],
+                    "content": r["content"],
+                    "confidence": round(float(r["confidence"]), 2),
+                    "created_at": str(r["created_at"])[:10],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            # categoryカラムが存在しない旧DBへのフォールバック（UndefinedColumnError等）
+            logger.warning(f"list_all query failed ({type(e).__name__}): {e} — retrying without category")
+            try:
+                rows = await self.db.fetch(
+                    "SELECT id, topic, content, confidence, created_at "
+                    "FROM knowledge_base WHERE source='user_memory' "
+                    "ORDER BY confidence DESC, created_at DESC LIMIT $1",
+                    limit
+                )
+                return [
+                    {
+                        "id": str(r["id"]),
+                        "type": "general",
+                        "type_label": "一般情報",
+                        "topic": r["topic"],
+                        "content": r["content"],
+                        "confidence": round(float(r["confidence"]), 2),
+                        "created_at": str(r["created_at"])[:10],
+                    }
+                    for r in rows
+                ]
+            except Exception as e2:
+                logger.error(f"list_all fallback also failed: {e2}")
+                return []
 
     async def search(self, query: str, limit: int = 10) -> list[dict]:
-        """キーワードで記憶を検索"""
-        rows = await self.db.fetch(
-            "SELECT id, topic, content, category, confidence, created_at "
-            "FROM knowledge_base "
-            "WHERE source='user_memory' AND (topic ILIKE $1 OR content ILIKE $1) "
-            "ORDER BY confidence DESC, created_at DESC LIMIT $2",
-            f"%{query}%", limit
-        )
-        return [
-            {
-                "id": str(r["id"]),
-                "type": r["category"],
-                "type_label": MEMORY_TYPE_LABELS.get(r["category"], r["category"]),
-                "topic": r["topic"],
-                "content": r["content"],
-                "confidence": round(float(r["confidence"]), 2),
-                "created_at": str(r["created_at"])[:10],
-            }
-            for r in rows
-        ]
+        """キーワードで記憶を検索。categoryカラムが存在しない旧DBにも対応。"""
+        try:
+            rows = await self.db.fetch(
+                "SELECT id, topic, content, category, confidence, created_at "
+                "FROM knowledge_base "
+                "WHERE source='user_memory' AND (topic ILIKE $1 OR content ILIKE $1) "
+                "ORDER BY confidence DESC, created_at DESC LIMIT $2",
+                f"%{query}%", limit
+            )
+            return [
+                {
+                    "id": str(r["id"]),
+                    "type": r["category"],
+                    "type_label": MEMORY_TYPE_LABELS.get(r["category"], r["category"]),
+                    "topic": r["topic"],
+                    "content": r["content"],
+                    "confidence": round(float(r["confidence"]), 2),
+                    "created_at": str(r["created_at"])[:10],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            # categoryカラムが存在しない旧DBへのフォールバック
+            logger.warning(f"search query failed ({type(e).__name__}): {e} — retrying without category")
+            try:
+                rows = await self.db.fetch(
+                    "SELECT id, topic, content, confidence, created_at "
+                    "FROM knowledge_base "
+                    "WHERE source='user_memory' AND (topic ILIKE $1 OR content ILIKE $1) "
+                    "ORDER BY confidence DESC, created_at DESC LIMIT $2",
+                    f"%{query}%", limit
+                )
+                return [
+                    {
+                        "id": str(r["id"]),
+                        "type": "general",
+                        "type_label": "一般情報",
+                        "topic": r["topic"],
+                        "content": r["content"],
+                        "confidence": round(float(r["confidence"]), 2),
+                        "created_at": str(r["created_at"])[:10],
+                    }
+                    for r in rows
+                ]
+            except Exception as e2:
+                logger.error(f"search fallback also failed: {e2}")
+                return []
 
     async def delete(self, memory_id: str) -> bool:
         """特定の記憶を削除"""

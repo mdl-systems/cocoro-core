@@ -1473,7 +1473,11 @@ async def memory_list(
     """保存された記憶一覧を返す。memory_type で絞り込み可能"""
     if user_memories is None:
         return {"memories": [], "count": 0}
-    memories = await user_memories.list_all(memory_type=memory_type, limit=limit)
+    try:
+        memories = await user_memories.list_all(memory_type=memory_type, limit=limit)
+    except Exception as e:
+        logger.warning(f"memory_list error ({type(e).__name__}): {e} — returning empty list")
+        memories = []
     return {"memories": memories, "count": len(memories)}
 
 

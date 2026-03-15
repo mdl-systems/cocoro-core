@@ -324,8 +324,12 @@ CREATE TABLE knowledge_base (
     content TEXT NOT NULL,
     source TEXT DEFAULT 'conversation',
     confidence REAL DEFAULT 0.7 CHECK (confidence BETWEEN 0.0 AND 1.0),
+    category TEXT DEFAULT 'general',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE TRIGGER kb_updated BEFORE UPDATE ON knowledge_base
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 CREATE INDEX idx_kb_topic ON knowledge_base USING gin(topic gin_trgm_ops);
 
 -- ============================================
