@@ -174,14 +174,18 @@ ip_filter = IPFilter()
 
 # Rate limit設定 (パスパターンごと)
 RATE_LIMIT_CONFIG = {
-    "/auth/": {"max_tokens": 10, "refill_rate": 0.1},   # 認証: 10回/100秒
-    "/chat": {"max_tokens": 30, "refill_rate": 0.5},     # チャット: 30回/60秒
+    "/auth/": {"max_tokens": 10,  "refill_rate": 0.1},   # 認証: 10回/100秒
+    "/chat":  {"max_tokens": 30,  "refill_rate": 0.5},   # チャット: 30回/60秒
     "/setup/": {"max_tokens": 20, "refill_rate": 0.3},   # セットアップ: 20回/66秒
-    "default": {"max_tokens": 120, "refill_rate": 2.0},  # その他: 120回/60秒
+    "default": {"max_tokens": 600, "refill_rate": 10.0}, # その他: 600回/60秒
 }
 
-# 認証不要パス
+# レート制限・認証をスキップするパス（完全バイパス）
 PUBLIC_PATHS = {"/health", "/dashboard", "/docs", "/openapi.json", "/redoc"}
+
+# レート制限をスキップする内部ネットワークIPプレフィックス
+# Nginxコンテナ・Docker内部ネットワークからのリクエストは制限スキップ
+INTERNAL_NETWORKS = ("172.", "192.168.", "10.", "127.", "::1")
 
 
 def _get_client_ip(request: Request) -> str:
@@ -220,10 +224,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         client_ip = _get_client_ip(request)
         path = request.url.path
 
+        # Public paths: 全チェックをスキップして即底返却
+        # /health はNginxヘルスチェックで高頻度呼び出されるためレート制限から除外する
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+
         # 1. HTTPS強制 (本番環境)
         if self.force_https:
             proto = request.headers.get("X-Forwarded-Proto", request.url.scheme)
-            if proto == "http" and path not in PUBLIC_PATHS:
+            if proto == "http":
                 https_url = str(request.url).replace("http://", "https://", 1)
                 return JSONResponse(
                     status_code=301,
@@ -252,15 +261,18 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # 4. Rate Limiting
-        config = _get_rate_limit_config(path)
+        # 内部ネットワーク（Nginxコンテナ・ Docker内部）からのリクエストはレート制限をスキップ
+        is_internal = client_ip.startswith(INTERNAL_NETWORKS)
         rate_key = f"{client_ip}:{path.split('/')[1] if '/' in path[1:] else path}"
-        if not rate_limiter.allow(rate_key, config["max_tokens"], config["refill_rate"]):
-            logger.warning(f"Rate limit exceeded: {client_ip} on {path}")
-            return JSONResponse(
-                status_code=429,
-                content={"error": "リクエスト数が上限を超えました", "type": "rate_limited"},
-                headers={"Retry-After": "60"},
-            )
+        if not is_internal:
+            config = _get_rate_limit_config(path)
+            if not rate_limiter.allow(rate_key, config["max_tokens"], config["refill_rate"]):
+                logger.warning(f"Rate limit exceeded: {client_ip} on {path}")
+                return JSONResponse(
+                    status_code=429,
+                    content={"error": "リクエスト数が上限を超えました", "type": "rate_limited"},
+                    headers={"Retry-After": "60"},
+                )
 
         # リクエスト実行
         response = await call_next(request)
