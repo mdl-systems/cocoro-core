@@ -333,6 +333,13 @@ async def lifespan(app: FastAPI):
             auto_thinker.run_hourly_scheduler(think_interval)))
         logger.info(f"Scheduler: autonomous thinking every {think_interval}h")
 
+    # ノード死活監視（30秒ごと）
+    node_monitor_interval = int(os.getenv("NODE_MONITOR_INTERVAL_SECONDS", "30"))
+    if node_monitor_interval > 0:
+        scheduler_tasks.append(asyncio.create_task(
+            _node_monitor_scheduler(db_pool, node_monitor_interval)))
+        logger.info(f"Scheduler: node health monitor every {node_monitor_interval}s")
+
     # メール通知エンジン初期化 (Resend)
     try:
         from agent.email_engine import EmailEngine
@@ -358,6 +365,39 @@ async def lifespan(app: FastAPI):
         t.cancel()
     await db_pool.close()
     logger.info("=== cocoro-core stopped ===")
+
+
+async def _node_monitor_scheduler(db_pool, interval_seconds: int = 30):
+    """登録済みノードを定期的にpingして死活監視 — オフライン時はDBステータスを更新"""
+    from api.routes.nodes import _ping_node, _update_status
+    await asyncio.sleep(30)  # 起動30秒後から開始
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            if db_pool is None:
+                continue
+            rows = await db_pool.fetch("SELECT node_id, ip, port FROM cocoro_nodes")
+            if not rows:
+                continue
+
+            async def _check_one(row):
+                online = await _ping_node(row["ip"], row["port"], timeout=3.0)
+                await _update_status(db_pool, row["node_id"], online)
+                if not online:
+                    logger.warning(
+                        f"[NodeMonitor] {row['node_id']} ({row['ip']}:{row['port']}) is OFFLINE"
+                    )
+                return row["node_id"], online
+
+            results = await asyncio.gather(*[_check_one(r) for r in rows], return_exceptions=True)
+            online_count = sum(1 for r in results if isinstance(r, tuple) and r[1])
+            logger.debug(
+                f"[NodeMonitor] checked {len(rows)} nodes: {online_count} online"
+            )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[NodeMonitor] Error: {e}")
 
 
 async def _consolidation_scheduler(interval_hours: int):

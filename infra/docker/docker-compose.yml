@@ -39,6 +39,8 @@ services:
       - SYNC_RECORD_INTERVAL_HOURS=${SYNC_RECORD_INTERVAL_HOURS:-12}
       - OBSERVATION_REPORT_INTERVAL_HOURS=${OBSERVATION_REPORT_INTERVAL_HOURS:-24}
       - MEMORY_ARCHIVE_INTERVAL_HOURS=${MEMORY_ARCHIVE_INTERVAL_HOURS:-24}
+      # Node health monitor (seconds, 0=disabled)
+      - NODE_MONITOR_INTERVAL_SECONDS=${NODE_MONITOR_INTERVAL_SECONDS:-30}
     depends_on:
       cocoro-postgres:
         condition: service_healthy

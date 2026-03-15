@@ -213,6 +213,11 @@ cocoro-core/
 
 | 日付 | 更新内容 |
 |------|---------|
+| 2026-03-15 | ノード死活監視スケジューラ追加（30秒ごとpingで自動オフライン検出） |
+| 2026-03-15 | `GET /nodes` に `live_check` パラメータ追加・`agent_port` フィールド追加 |
+| 2026-03-15 | `DELETE /nodes/{node_id}` エンドポイント追加 |
+| 2026-03-15 | `forward_to_node` に Authorization ヘッダー付与・ConnectError 自動オフライン対応 |
+| 2026-03-15 | `infra/migrations/v010_cocoro_nodes.sql` マイグレーション追加 |
 | 2026-03-14 | Cloudflare Tunnel セットアップスクリプト追加 (`scripts/setup-tunnel.sh`) |
 | 2026-03-14 | 本番用 `docker-compose.prod.yml` 追加（FORCE_HTTPS=true, リソース制限） |
 | 2026-03-14 | `/health` に `tunnel_enabled` / `tunnel_url` / `local_url` 追加 |
