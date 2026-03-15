@@ -177,7 +177,7 @@ RATE_LIMIT_CONFIG = {
     "/auth/": {"max_tokens": 10,  "refill_rate": 0.1},   # 認証: 10回/100秒
     "/chat":  {"max_tokens": 30,  "refill_rate": 0.5},   # チャット: 30回/60秒
     "/setup/": {"max_tokens": 20, "refill_rate": 0.3},   # セットアップ: 20回/66秒
-    "default": {"max_tokens": 600, "refill_rate": 10.0}, # その他: 600回/60秒
+    "default": {"max_tokens": 1000, "refill_rate": 20.0}, # その他: 1000回/60秒
 }
 
 # レート制限・認証をスキップするパス（完全バイパス）
