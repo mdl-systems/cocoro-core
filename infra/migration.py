@@ -80,6 +80,15 @@ MIGRATIONS = [
                 ON cocoro_nodes (status);
         """,
     },
+    {
+        "version": 6,
+        "name": "add_agent_port_to_nodes",
+        "description": "cocoro_nodes に agent_port カラムを追加 (cocoro-agent ポート)",
+        "sql": """
+            ALTER TABLE cocoro_nodes
+                ADD COLUMN IF NOT EXISTS agent_port INTEGER NOT NULL DEFAULT 8002;
+        """,
+    },
 ]
 
 
