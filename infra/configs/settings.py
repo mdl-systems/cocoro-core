@@ -67,7 +67,7 @@ class Settings:
 
     # === Cloudflare Tunnel ===
     TUNNEL_ENABLED: bool = os.getenv("TUNNEL_ENABLED", "false").lower() in ("true", "1", "yes")
-    TUNNEL_URL: str = os.getenv("TUNNEL_URL", "https://console.cocoro.ai")
+    TUNNEL_URL: str = os.getenv("TUNNEL_URL", "https://console.cocoro-os.com")
     LOCAL_URL: str = os.getenv("LOCAL_URL", "http://192.168.50.92")
 
     @property

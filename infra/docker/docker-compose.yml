@@ -41,6 +41,10 @@ services:
       - MEMORY_ARCHIVE_INTERVAL_HOURS=${MEMORY_ARCHIVE_INTERVAL_HOURS:-24}
       # Node health monitor (seconds, 0=disabled)
       - NODE_MONITOR_INTERVAL_SECONDS=${NODE_MONITOR_INTERVAL_SECONDS:-30}
+      # Cloudflare Tunnel
+      - TUNNEL_ENABLED=${TUNNEL_ENABLED:-false}
+      - TUNNEL_URL=${TUNNEL_URL:-https://console.cocoro-os.com}
+      - LOCAL_URL=${LOCAL_URL:-http://192.168.50.92}
     depends_on:
       cocoro-postgres:
         condition: service_healthy
