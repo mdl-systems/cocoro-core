@@ -148,22 +148,32 @@ async def get_audit_log(
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params += [limit, offset]
 
-    rows = await db_pool.fetch(
-        f"""
-        SELECT id, endpoint, method, client_ip, status_code,
-               response_time_ms, api_key_masked, user_agent, error_msg, created_at
-        FROM audit_log
-        {where}
-        ORDER BY created_at DESC
-        LIMIT ${idx} OFFSET ${idx+1}
-        """,
-        *params,
-    )
-
-    total = await db_pool.fetchval(
-        f"SELECT COUNT(*) FROM audit_log {where}",
-        *params[:-2],
-    )
+    try:
+        rows = await db_pool.fetch(
+            f"""
+            SELECT id, endpoint, method, client_ip, status_code,
+                   response_time_ms, api_key_masked, user_agent, error_msg, created_at
+            FROM audit_log
+            {where}
+            ORDER BY created_at DESC
+            LIMIT ${idx} OFFSET ${idx+1}
+            """,
+            *params,
+        )
+        total = await db_pool.fetchval(
+            f"SELECT COUNT(*) FROM audit_log {where}",
+            *params[:-2],
+        )
+    except Exception as e:
+        # audit_log テーブル未作成時（migration 未適用）は空を返す
+        logger.warning(f"audit_log table not available: {e}")
+        return {
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "logs": [],
+            "note": "audit_log table not yet created. Run /migrate/run to apply migrations.",
+        }
 
     return {
         "total": total,
@@ -188,45 +198,58 @@ async def get_audit_stats(_=Depends(lambda: _get_deps()[0]())):
     if not db_pool:
         raise HTTPException(503, "DB not initialized")
 
-    # 直近24時間
-    top_endpoints = await db_pool.fetch(
-        """
-        SELECT endpoint, COUNT(*) as count,
-               AVG(response_time_ms) as avg_ms,
-               COUNT(*) FILTER (WHERE status_code >= 400) as errors
-        FROM audit_log
-        WHERE created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY endpoint
-        ORDER BY count DESC
-        LIMIT 20
-        """,
-    )
-    status_dist = await db_pool.fetch(
-        """
-        SELECT status_code, COUNT(*) as count
-        FROM audit_log
-        WHERE created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY status_code
-        ORDER BY count DESC
-        """,
-    )
-    top_ips = await db_pool.fetch(
-        """
-        SELECT client_ip, COUNT(*) as count,
-               COUNT(*) FILTER (WHERE status_code >= 400) as errors
-        FROM audit_log
-        WHERE created_at > NOW() - INTERVAL '24 hours'
-        GROUP BY client_ip
-        ORDER BY count DESC
-        LIMIT 10
-        """,
-    )
-    total_calls = await db_pool.fetchval(
-        "SELECT COUNT(*) FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'"
-    )
-    avg_response = await db_pool.fetchval(
-        "SELECT AVG(response_time_ms) FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'"
-    )
+    try:
+        # 直近24時間
+        top_endpoints = await db_pool.fetch(
+            """
+            SELECT endpoint, COUNT(*) as count,
+                   AVG(response_time_ms) as avg_ms,
+                   COUNT(*) FILTER (WHERE status_code >= 400) as errors
+            FROM audit_log
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY endpoint
+            ORDER BY count DESC
+            LIMIT 20
+            """,
+        )
+        status_dist = await db_pool.fetch(
+            """
+            SELECT status_code, COUNT(*) as count
+            FROM audit_log
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY status_code
+            ORDER BY count DESC
+            """,
+        )
+        top_ips = await db_pool.fetch(
+            """
+            SELECT client_ip, COUNT(*) as count,
+                   COUNT(*) FILTER (WHERE status_code >= 400) as errors
+            FROM audit_log
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY client_ip
+            ORDER BY count DESC
+            LIMIT 10
+            """,
+        )
+        total_calls = await db_pool.fetchval(
+            "SELECT COUNT(*) FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'"
+        )
+        avg_response = await db_pool.fetchval(
+            "SELECT AVG(response_time_ms) FROM audit_log WHERE created_at > NOW() - INTERVAL '24 hours'"
+        )
+    except Exception as e:
+        # audit_log テーブル未作成時（migration 未適用）は空統計を返す
+        logger.warning(f"audit_log table not available: {e}")
+        return {
+            "period": "last_24h",
+            "total_calls": 0,
+            "avg_response_ms": 0,
+            "top_endpoints": [],
+            "status_distribution": [],
+            "top_ips": [],
+            "note": "audit_log table not yet created. Run /migrate/run to apply migrations.",
+        }
 
     return {
         "period": "last_24h",
