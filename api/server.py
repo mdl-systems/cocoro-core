@@ -2701,7 +2701,7 @@ async def delegate_task(req: DelegateReq, _=Depends(verify_api_key)):
         if req.auto_cascade and (not to_agent) and db_pool:
             # タスク内容から適切な Director を選拦
             task_row = await db_pool.fetchrow(
-                "SELECT title, description FROM agent_tasks WHERE id=$1::uuid",
+                "SELECT title, description FROM tasks WHERE id=$1::uuid",
                 req.task_id
             )
             title = (task_row["title"] if task_row else "").lower()
@@ -2753,15 +2753,21 @@ async def org_hierarchy(_=Depends(verify_api_key)):
 
     LEVEL_LABELS = {0: "CEO", 1: "Director", 2: "Manager", 3: "Worker"}
 
-    # 全エージェントを取得
+    # 全エージェントを取得（departments を LEFT JOIN して部門名を取得）
     rows = await db_pool.fetch(
         """
-        SELECT agent_type, display_name, role, status, department,
-               COALESCE(level, 0)            AS level,
-               parent_agent_id,
-               COALESCE(max_subordinates, 5) AS max_subordinates
-        FROM agent_registry
-        ORDER BY level, agent_type
+        SELECT
+            ar.agent_type,
+            ar.display_name,
+            ar.role,
+            ar.status,
+            d.name                             AS department_name,
+            COALESCE(ar.level, 0)              AS level,
+            ar.parent_agent_id,
+            COALESCE(ar.max_subordinates, 5)   AS max_subordinates
+        FROM agent_registry ar
+        LEFT JOIN departments d ON d.id = ar.department_id
+        ORDER BY level, ar.agent_type
         """
     )
     agents = {r["agent_type"]: dict(r) for r in rows}
@@ -2773,13 +2779,13 @@ async def org_hierarchy(_=Depends(verify_api_key)):
         a = agents.get(agent_type, {})
         level = a.get("level", 0)
         node = {
-            "id":              agent_type,
-            "name":            a.get("display_name", agent_type),
-            "role":            a.get("role", ""),
-            "status":          a.get("status", "unknown"),
-            "department":      a.get("department"),
-            "level":           level,
-            "level_label":     LEVEL_LABELS.get(level, f"Level{level}"),
+            "id":               agent_type,
+            "name":             a.get("display_name", agent_type),
+            "role":             a.get("role", ""),
+            "status":           a.get("status", "unknown"),
+            "department":       a.get("department_name"),  # LEFT JOIN 結果
+            "level":            level,
+            "level_label":      LEVEL_LABELS.get(level, f"Level{level}"),
             "max_subordinates": a.get("max_subordinates", 5),
         }
         # 直属部下を再帰的に構築
