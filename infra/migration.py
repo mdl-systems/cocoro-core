@@ -89,6 +89,26 @@ MIGRATIONS = [
                 ADD COLUMN IF NOT EXISTS agent_port INTEGER NOT NULL DEFAULT 8002;
         """,
     },
+    {
+        "version": 7,
+        "name": "org_hierarchy_columns",
+        "description": "agent_registry に parent_agent_id / level / max_subordinates を追加（組織階層構造）",
+        "sql": """
+            ALTER TABLE agent_registry
+                ADD COLUMN IF NOT EXISTS parent_agent_id TEXT,
+                ADD COLUMN IF NOT EXISTS level            INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS max_subordinates INTEGER DEFAULT 5;
+
+            CREATE INDEX IF NOT EXISTS idx_agent_registry_level
+                ON agent_registry (level);
+            CREATE INDEX IF NOT EXISTS idx_agent_registry_parent
+                ON agent_registry (parent_agent_id);
+
+            UPDATE agent_registry
+            SET level = 1
+            WHERE agent_type IN ('dev', 'marketing', 'sales');
+        """,
+    },
 ]
 
 

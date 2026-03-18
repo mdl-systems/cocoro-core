@@ -2650,35 +2650,187 @@ class AgentRegReq(BaseModel):
     role: str = "worker"
     capabilities: list[str] = []
     department: str | None = None
+    parent_agent_id: str | None = None   # 親エージェントの agent_type
+    level: int = 1                        # 0=CEO, 1=Director, 2=Manager, 3=Worker
+    max_subordinates: int = 5             # 最大直属部下数
 
 @app.post("/org/agents/register")
 async def register_agent(req: AgentRegReq, _=Depends(verify_api_key)):
-    """新しいAgentを組織に登録"""
+    """新しいAgentを組織に登録（階層情報付き）"""
     try:
         agent = await org.register_agent(
             agent_type=req.agent_type, display_name=req.display_name,
             role=req.role, capabilities=req.capabilities,
             department=req.department)
-        return {"status": "registered", "agent": agent}
+        # 階層カラムを DB に直接更新
+        if db_pool:
+            await db_pool.execute(
+                """
+                UPDATE agent_registry
+                SET parent_agent_id = $1,
+                    level            = $2,
+                    max_subordinates = $3
+                WHERE agent_type = $4
+                """,
+                req.parent_agent_id,
+                req.level,
+                req.max_subordinates,
+                req.agent_type,
+            )
+        return {"status": "registered", "agent": agent,
+                "hierarchy": {"level": req.level,
+                               "parent_agent_id": req.parent_agent_id,
+                               "max_subordinates": req.max_subordinates}}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 class DelegateReq(BaseModel):
     task_id: str
     from_agent: str
-    to_agent: str
+    to_agent: str = ""           # 空の場合は階層自動振り分け (CEO→Director)
     reason: str = ""
+    auto_cascade: bool = True     # CEOからの器示はDirectorに自動振り分け
 
 @app.post("/org/delegate")
 async def delegate_task(req: DelegateReq, _=Depends(verify_api_key)):
-    """タスクを別Agentに委任"""
+    """タスクを別Agentに委任。CEOからの器示は適切なDirectorに自動振り分け。"""
     try:
+        to_agent = req.to_agent
+
+        # 階層自動振り分け: from_agent が CEO (level=0) で to_agent 未指定の場合
+        if req.auto_cascade and (not to_agent) and db_pool:
+            # タスク内容から適切な Director を選拦
+            task_row = await db_pool.fetchrow(
+                "SELECT title, description FROM agent_tasks WHERE id=$1::uuid",
+                req.task_id
+            )
+            title = (task_row["title"] if task_row else "").lower()
+            desc  = (task_row["description"] if task_row else "").lower()
+            text  = title + " " + desc
+
+            # キーワードマッチングで Director を推定
+            if any(k in text for k in ["コード", "code", "プログラム", "バグ", "bug", "レビュー", "api", "テスト"]):
+                to_agent = "dev"
+            elif any(k in text for k in ["マーケティング", "広告", "sns", "キャンペーン", "ブランド"]):
+                to_agent = "marketing"
+            elif any(k in text for k in ["営業", "販売", "出荷", "原価", "契約", "sales", "顧客"]):
+                to_agent = "sales"
+            else:
+                # デフォルト: 最もアイドルな Directorへ
+                director_row = await db_pool.fetchrow(
+                    "SELECT agent_type FROM agent_registry WHERE level=1 "
+                    "AND status='active' ORDER BY RANDOM() LIMIT 1"
+                )
+                to_agent = director_row["agent_type"] if director_row else "dev"
+
+            logger.info(f"[Delegate] Auto-routed to Director: {to_agent} (task={req.task_id[:8]})")
+
+        if not to_agent:
+            raise HTTPException(status_code=400, detail="to_agent を指定するか auto_cascade=true にしてください")
+
         result = await org.delegate_task(
             task_id=req.task_id, from_agent=req.from_agent,
-            to_agent=req.to_agent, reason=req.reason)
-        return {"status": "delegated", "delegation": result}
+            to_agent=to_agent, reason=req.reason)
+        return {"status": "delegated", "delegation": result, "routed_to": to_agent}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/org/hierarchy", tags=["org"], summary="組織階層ツリー")
+async def org_hierarchy(_=Depends(verify_api_key)):
+    """組織階層構造をツリー形式で返す。
+
+    レイヤー定義:
+      0 = CEO   (最上位)
+      1 = Director (部長)
+      2 = Manager  (マネージャー)
+      3 = Worker   (作業員)
+    """
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="DB not ready")
+
+    LEVEL_LABELS = {0: "CEO", 1: "Director", 2: "Manager", 3: "Worker"}
+
+    # 全エージェントを取得
+    rows = await db_pool.fetch(
+        """
+        SELECT agent_type, display_name, role, status, department,
+               COALESCE(level, 0)            AS level,
+               parent_agent_id,
+               COALESCE(max_subordinates, 5) AS max_subordinates
+        FROM agent_registry
+        ORDER BY level, agent_type
+        """
+    )
+    agents = {r["agent_type"]: dict(r) for r in rows}
+
+    def _build_node(agent_type: str, visited: set) -> dict:
+        if agent_type in visited:
+            return {}  # 循環参照防止
+        visited.add(agent_type)
+        a = agents.get(agent_type, {})
+        level = a.get("level", 0)
+        node = {
+            "id":              agent_type,
+            "name":            a.get("display_name", agent_type),
+            "role":            a.get("role", ""),
+            "status":          a.get("status", "unknown"),
+            "department":      a.get("department"),
+            "level":           level,
+            "level_label":     LEVEL_LABELS.get(level, f"Level{level}"),
+            "max_subordinates": a.get("max_subordinates", 5),
+        }
+        # 直属部下を再帰的に構築
+        children_key = {
+            0: "directors",
+            1: "managers",
+            2: "workers",
+        }.get(level)
+        if children_key:
+            children = [
+                _build_node(at, visited)
+                for at, ag in agents.items()
+                if ag.get("parent_agent_id") == agent_type
+            ]
+            node[children_key] = children
+        return node
+
+    # CEO ノードを前展
+    ceo_agents = [a for a in agents.values() if a.get("level", 0) == 0]
+
+    # CEO なし → デフォルト CEO ノードを容用
+    if ceo_agents:
+        ceo = ceo_agents[0]
+        ceo_node = _build_node(ceo["agent_type"], set())
+    else:
+        # CEO 登録なしの場合: level=1 をディレクターとして CEO 代用ノードを容用
+        directors = [
+            _build_node(at, set())
+            for at, ag in agents.items()
+            if ag.get("level", 1) == 1
+        ]
+        ceo_node = {
+            "id":          "ceo",
+            "name":        "CEO (You)",
+            "level":       0,
+            "level_label": "CEO",
+            "directors":   directors,
+        }
+
+    # level 別サマリー
+    summary = {}
+    for a in agents.values():
+        lv = a.get("level", 0)
+        lbl = LEVEL_LABELS.get(lv, f"Level{lv}")
+        summary[lbl] = summary.get(lbl, 0) + 1
+
+    return {
+        "ceo":     ceo_node,
+        "summary": summary,
+        "total":   len(agents),
+    }
 
 
 # === Schedules (スケジュール管理) ===
