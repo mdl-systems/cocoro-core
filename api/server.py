@@ -2754,22 +2754,42 @@ async def org_hierarchy(_=Depends(verify_api_key)):
     LEVEL_LABELS = {0: "CEO", 1: "Director", 2: "Manager", 3: "Worker"}
 
     # 全エージェントを取得（departments を LEFT JOIN して部門名を取得）
-    rows = await db_pool.fetch(
-        """
-        SELECT
-            ar.agent_type,
-            ar.display_name,
-            ar.role,
-            ar.status,
-            d.name                             AS department_name,
-            COALESCE(ar.level, 0)              AS level,
-            ar.parent_agent_id,
-            COALESCE(ar.max_subordinates, 5)   AS max_subordinates
-        FROM agent_registry ar
-        LEFT JOIN departments d ON d.id = ar.department_id
-        ORDER BY level, ar.agent_type
-        """
-    )
+    # migration v7 未適用 (level/parent_agent_id等が未存在) でも動くよう try/except
+    try:
+        rows = await db_pool.fetch(
+            """
+            SELECT
+                ar.agent_type,
+                ar.display_name,
+                ar.role,
+                ar.status,
+                d.name                             AS department_name,
+                COALESCE(ar.level, 0)              AS level,
+                ar.parent_agent_id,
+                COALESCE(ar.max_subordinates, 5)   AS max_subordinates
+            FROM agent_registry ar
+            LEFT JOIN departments d ON d.id = ar.department_id
+            ORDER BY level, ar.agent_type
+            """
+        )
+    except Exception:
+        # level/parent_agent_id カラム未存在（migration v7 未適用）のフォールバック
+        rows = await db_pool.fetch(
+            """
+            SELECT
+                ar.agent_type,
+                ar.display_name,
+                ar.role,
+                ar.status,
+                d.name  AS department_name,
+                0       AS level,
+                NULL    AS parent_agent_id,
+                5       AS max_subordinates
+            FROM agent_registry ar
+            LEFT JOIN departments d ON d.id = ar.department_id
+            ORDER BY ar.agent_type
+            """
+        )
     agents = {r["agent_type"]: dict(r) for r in rows}
 
     def _build_node(agent_type: str, visited: set) -> dict:
